@@ -4,6 +4,7 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 
 async function connectToDatabase() {
@@ -20,6 +21,11 @@ connectToDatabase();
 
 import adminRoutes from '@/admin/routes/index';
 import studyMaterialRoutes from '@/routes/studyMaterial';
+import authRoutes from './erp/routes/authRoutes';
+import admissionRoutes from './erp/routes/admissionRoutes';
+import erpRoutes from './erp/routes/index';
+import feeRoutes from './erp/routes/feeRoutes';
+import { seedClasses } from './erp/services/seedClasses';
 
 const app = express();
 
@@ -32,9 +38,19 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(cookieParser());
 
 app.use('/api/admin', adminRoutes);
 app.use('/api/study-material', studyMaterialRoutes);
+import topResultRoutes from './routes/topResult';
+app.use('/api/top-results', topResultRoutes);
+
+app.use('/api/auth', authRoutes);
+app.use('/api/admissions', admissionRoutes);
+app.use('/api/erp', erpRoutes);
+app.use('/api/fees', feeRoutes);
+import paymentRoutes from './erp/routes/paymentRoutes';
+app.use('/api/payments', paymentRoutes);
 
 app.get('/', (req, res) => {
     res.send('Hello, World!');
@@ -42,4 +58,7 @@ app.get('/', (req, res) => {
 
 const PORT = 8000;
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    seedClasses();
+});
