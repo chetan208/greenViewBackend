@@ -1,0 +1,44 @@
+{
+  "name": "backend-green-view",
+  "version": "1.0.0",
+  "description": "green view backend ",
+  "keywords": [
+    "green",
+    "view"
+  ],
+  "homepage": "https://github.com/chetan208/green-view-backend-#readme",
+  "bugs": {
+    "url": "https://github.com/chetan208/green-view-backend-/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chetan208/green-view-backend-.git"
+  },
+  "license": "ISC",
+  "author": "Chetan",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "tsx watch ./src/index.ts"
+  },
+  "dependencies": {
+    "cloudinary": "^2.10.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mongoose": "^9.9.1",
+    "multer": "^2.2.0",
+    "nodemon": "^3.1.14"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.1.0",
+    "@types/pg": "^8.20.0",
+    "dotenv-cli": "^11.0.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  }
+}
