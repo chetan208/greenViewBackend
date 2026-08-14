@@ -56,10 +56,33 @@ const otpLimiter = rateLimit({
 app.use('/api/auth/send-otp', otpLimiter);
 
 // Enable CORS for frontend & client requests
+const allowedOrigins = [
+    'https://greenviewschool.in',
+    'https://www.greenviewschool.in',
+    'https://erp.greenviewschool.in',
+    'http://localhost:3000'
+];
+
+if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
 app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-        ? ['https://greenviewschool.com', 'https://erp.greenviewschool.com', process.env.FRONTEND_URL || ''] 
-        : true,
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        if (process.env.NODE_ENV !== 'production') {
+            return callback(null, true); // Allow all in dev
+        }
+
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.error(`CORS Blocked: Origin ${origin} not allowed.`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
