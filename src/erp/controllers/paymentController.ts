@@ -93,6 +93,56 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
         await session.commitTransaction();
         session.endSession();
 
+        // Send WhatsApp Notification
+        try {
+            // Find student to get contact details
+            const studentSession = await mongoose.model('StudentSession').findById(studentSessionId).populate('userId');
+            if (studentSession && studentSession.userId) {
+                const user: any = studentSession.userId;
+                if (user.phone) {
+                    const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000";
+                    let whatsappMsg = `Dear Parent,\n\nWe have received a fee payment of ₹${parseFloat(amountPaid).toFixed(2)} (via ${paymentMode}) for student ${user.name} (Card No: ${studentSession.cardNo}).\n\n`;
+                    
+                    if (paymentsMade.length > 0) {
+                        whatsappMsg += `View/Print Digital Invoice: ${FRONTEND_URL}/erp/fees/receipt/${paymentsMade[0].receiptNo}\n\n`;
+                    }
+
+                    // Calculate remaining balance
+                    const remainingFees = await FeeStructure.find({
+                        studentSessionId,
+                        status: { $in: ['PENDING', 'PARTIALLY_PAID'] }
+                    });
+
+                    let totalRemaining = 0;
+                    const breakdowns = [];
+                    for (const fs of remainingFees) {
+                        const existingPayments = await Payment.find({ feeStructureId: fs._id });
+                        const totalPaidSoFar = existingPayments.reduce((sum, p) => sum + p.amountPaid, 0);
+                        const monthRemaining = fs.total - totalPaidSoFar;
+                        if (monthRemaining > 0) {
+                            totalRemaining += monthRemaining;
+                            breakdowns.push(`- ${fs.month}: ₹${monthRemaining.toFixed(2)} pending`);
+                        }
+                    }
+
+                    if (totalRemaining > 0) {
+                        whatsappMsg += `The overall remaining balance is ₹${totalRemaining.toFixed(2)}.\n\nPending Month Breakdown:\n${breakdowns.join("\n")}\n\n`;
+                    } else {
+                        whatsappMsg += `All pending fees have been fully paid. Your remaining balance is ₹0.00.\n\n`;
+                    }
+                    
+                    whatsappMsg += `Thank you,\nGreen View Administration`;
+
+                    // Send asynchronously
+                    import('../services/whatsappService').then(({ sendWhatsAppMessage }) => {
+                        sendWhatsAppMessage(user.phone, whatsappMsg).catch((err: any) => console.error("WhatsApp error:", err));
+                    }).catch(err => console.error("Failed to load whatsapp module:", err));
+                }
+            }
+        } catch (whatsappErr) {
+            console.error("WhatsApp fee notification error:", whatsappErr);
+        }
+
         res.status(200).json({ 
             success: true, 
             message: 'Payment processed successfully',

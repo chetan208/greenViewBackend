@@ -59,14 +59,29 @@ const deleteFromCloudinary = async (cloudData: CloudMediaItem[]) => {
 export const getFolders = async (req: Request, res: Response) => {
     try {
         const folders = await Folder.find()
-            .populate('media')
             .sort({ createdAt: -1 })
             .lean();
 
+        const foldersWithCover = await Promise.all(
+            folders.map(async (folder) => {
+                const [coverMedia, totalMediaCount] = await Promise.all([
+                    Gallery.findOne({ folder: folder._id }).sort({ createdAt: -1 }).lean(),
+                    Gallery.countDocuments({ folder: folder._id })
+                ]);
+                return {
+                    _id: folder._id,
+                    name: folder.name,
+                    createdAt: folder.createdAt,
+                    totalMediaCount,
+                    coverMedia
+                };
+            })
+        );
+
         res.status(200).json({
             success: true,
-            count: folders.length,
-            folders
+            count: foldersWithCover.length,
+            folders: foldersWithCover
         });
     } catch (error) {
         console.error('Error fetching folders:', error);
@@ -85,18 +100,52 @@ export const getFolderById = async (req: Request, res: Response) => {
             return res.status(400).json({ success: false, message: 'Invalid folder ID format' });
         }
 
-        const folder = await Folder.findById(id)
+        const pageParam = req.query.page ? parseInt(req.query.page as string) : null;
+        const limitParam = req.query.limit ? parseInt(req.query.limit as string) : null;
+
+        const folder = await Folder.findById(id).lean();
+        if (!folder) {
+            return res.status(404).json({ success: false, message: 'Folder not found' });
+        }
+
+        if (pageParam !== null || limitParam !== null) {
+            const page = Math.max(1, pageParam || 1);
+            const limit = Math.max(1, Math.min(100, limitParam || 12));
+            const skip = (page - 1) * limit;
+
+            const [media, total] = await Promise.all([
+                Gallery.find({ folder: id })
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                Gallery.countDocuments({ folder: id })
+            ]);
+
+            return res.status(200).json({
+                success: true,
+                folder: {
+                    ...folder,
+                    media
+                },
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit),
+                    hasMore: page < Math.ceil(total / limit)
+                }
+            });
+        }
+
+        const fullFolder = await Folder.findById(id)
             .populate({
                 path: 'media',
                 options: { sort: { createdAt: -1 } }
             })
             .lean();
 
-        if (!folder) {
-            return res.status(404).json({ success: false, message: 'Folder not found' });
-        }
-
-        res.status(200).json({ success: true, folder });
+        res.status(200).json({ success: true, folder: fullFolder });
     } catch (error) {
         console.error('Error fetching folder:', error);
         res.status(500).json({ success: false, message: 'Error fetching folder' });

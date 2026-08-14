@@ -57,6 +57,9 @@ export interface IAdmissionApplication extends Document {
     isProvisional?: boolean;
     selectedSubjects?: string[];
 
+    station?: string;
+    requiresTransport?: boolean;
+
     previousExams?: IPreviousExam[];
 
     bankAccountNo?: string;
@@ -133,6 +136,9 @@ const admissionApplicationSchema = new Schema<IAdmissionApplication>({
     stream: String,
     isProvisional: Boolean,
     selectedSubjects: [String],
+
+    station: String,
+    requiresTransport: Boolean,
 
     previousExams: [previousExamSchema],
 

@@ -7,6 +7,8 @@ import StudentSession from '../../model/erpModels/studentSession';
 import FeeStructure from '../../model/erpModels/feeStructure';
 import { generateFeeStructuresForSession } from '../services/feeService';
 
+import { sendWhatsAppMessage } from '../services/whatsappService';
+
 export const createStudent = async (req: Request, res: Response): Promise<void> => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -114,6 +116,12 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
         await session.commitTransaction();
         session.endSession();
 
+        // Send WhatsApp Admission Notification
+        const message = `Dear ${data.fatherName || 'Parent'},\n\nYour child ${data.studentName} has been successfully admitted to Green View School in ${classDoc.className}.\n\nThank you for choosing Green View School!`;
+        sendWhatsAppMessage(data.fatherMobile, message).catch(err => {
+            console.error("Failed to send admission WhatsApp message:", err);
+        });
+
         res.status(201).json({ success: true, message: 'Student created successfully', user, studentSession });
     } catch (error: any) {
         await session.abortTransaction();
@@ -125,21 +133,31 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
 
 export const getStudents = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { search, classId, session: sessionId, limit = 50 } = req.query;
+        const searchStr = req.query.search ? String(req.query.search) : '';
+        const classIdStr = req.query.classId ? String(req.query.classId) : '';
+        const sessionStr = req.query.session ? String(req.query.session) : '';
+        const limit = Math.max(1, parseInt(String(req.query.limit || 50)) || 50);
 
-        let activeSessionId = sessionId;
+        let activeSessionId: string | null = sessionStr || null;
+
+        if (sessionStr && !mongoose.Types.ObjectId.isValid(sessionStr)) {
+            const sessionDoc = await Session.findOne({ year: sessionStr });
+            if (sessionDoc) activeSessionId = (sessionDoc._id as any).toString();
+            else activeSessionId = null;
+        }
+
         if (!activeSessionId) {
             const activeSession = await Session.findOne({ isActive: true });
-            activeSessionId = activeSession?._id as any;
+            activeSessionId = activeSession ? (activeSession._id as any).toString() : null;
         }
 
         const filter: any = { sessionId: activeSessionId };
-        if (classId) filter.classId = classId;
+        if (classIdStr) filter.classId = classIdStr;
 
         const studentSessions = await StudentSession.find(filter)
             .populate({
                 path: 'userId',
-                match: search ? { name: { $regex: search, $options: 'i' } } : {},
+                match: searchStr ? { name: { $regex: searchStr, $options: 'i' } } : {},
                 select: '-otp -otpExpiry'
             })
             .populate('classId', 'className')

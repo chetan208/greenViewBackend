@@ -68,15 +68,11 @@ export const getFeeStats = async (req: Request, res: Response): Promise<void> =>
         }
 
         // Find session ID
-        const Session = require('../../model/erpModels/session').default;
         const sessionRecord = await Session.findOne({ year: session });
         if (!sessionRecord) {
              res.status(404).json({ success: false, message: 'Session not found' });
              return;
         }
-
-        const StudentSession = require('../../model/erpModels/studentSession').default;
-        const FeeStructure = require('../../model/erpModels/feeStructure').default;
 
         // Total students in session
         const totalStudents = await StudentSession.countDocuments({ sessionId: sessionRecord._id });

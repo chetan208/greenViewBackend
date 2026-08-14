@@ -6,6 +6,8 @@ import Session from '../../model/erpModels/session';
 import Class from '../../model/erpModels/class';
 import StudentSession from '../../model/erpModels/studentSession';
 import { generateFeeStructuresForSession } from '../services/feeService';
+import { getNextCloudinaryInstance } from '../../../config/cloudinary';
+import { sendWhatsAppMessage } from '../services/whatsappService';
 
 // Generate application ID like PR-2026-001 or SR-2026-001
 const generateAppId = async (type: 'primary' | 'senior', year: string): Promise<string> => {
@@ -26,12 +28,38 @@ const generateAppId = async (type: 'primary' | 'senior', year: string): Promise<
     return `${prefix}-${yearPrefix}-${nextNum.toString().padStart(3, '0')}`;
 };
 
+import fs from 'fs';
+
 export const submitApplication = async (req: Request, res: Response): Promise<void> => {
+    let uploadedCloudName: string | null = null;
+    let uploadedPublicId: string | null = null;
+    let usedCloudinaryInstance: any = null;
+
     try {
         const data = req.body;
         
+        // Parse JSON strings from FormData
+        if (typeof data.selectedSubjects === 'string') {
+            try { data.selectedSubjects = JSON.parse(data.selectedSubjects); } catch (e) {}
+        }
+        if (typeof data.previousExams === 'string') {
+            try { 
+                data.previousExams = JSON.parse(data.previousExams); 
+                if (Array.isArray(data.previousExams)) {
+                    data.previousExams = data.previousExams.map((exam: any) => {
+                        if (typeof exam.percentage === 'string') {
+                            exam.percentage = Number(exam.percentage.replace('%', '').trim());
+                        }
+                        if (typeof exam.maxMarks === 'string') exam.maxMarks = Number(exam.maxMarks);
+                        if (typeof exam.marksObtained === 'string') exam.marksObtained = Number(exam.marksObtained);
+                        return exam;
+                    });
+                }
+            } catch (e) {}
+        }
+        
         // Auto-determine type based on class (simple logic: XI/XII = senior)
-        const isSenior = ['Class XI', 'Class XII'].includes(data.appliedClass);
+        const isSenior = ['Class 11', 'Class 12', 'Class XI', 'Class XII'].includes(data.appliedClass);
         data.applicationType = isSenior ? 'senior' : 'primary';
         
         // Use active session if not provided
@@ -44,18 +72,65 @@ export const submitApplication = async (req: Request, res: Response): Promise<vo
             data.sessionYear = activeSession.year;
         }
 
+        if (data.aadhaarNumber) {
+            const existingApp = await AdmissionApplication.findOne({ aadhaarNumber: data.aadhaarNumber, sessionYear: data.sessionYear });
+            if (existingApp) {
+                res.status(400).json({ error: 'An application with this Aadhaar number has already been submitted for the current session.' });
+                return;
+            }
+        }
+
         data.applicationId = await generateAppId(data.applicationType, data.sessionYear);
         
+        if (req.file) {
+            const { cloudinary, cloud_name } = getNextCloudinaryInstance();
+            const result = await cloudinary.uploader.upload(req.file.path, {
+                folder: 'admissions'
+            });
+
+            uploadedCloudName = cloud_name;
+            uploadedPublicId = result.public_id;
+            usedCloudinaryInstance = cloudinary;
+
+            data.photoUrl = result.secure_url;
+            data.photoPublicId = result.public_id;
+            data.cloudName = cloud_name;
+
+            // Cleanup temp file
+            fs.promises.unlink(req.file.path).catch(err => console.error('Failed to clean up temp file:', err));
+        }
+
         const application = new AdmissionApplication(data);
         await application.save();
+
+        // Send WhatsApp notification
+        if (data.fatherMobile) {
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            const downloadLink = `${frontendUrl}/api/erp/admissions/${application._id}/pdf`;
+            const message = `Hello ${data.studentName || 'Student'},\n\nYour admission application for ${data.appliedClass} has been submitted successfully.\n\nApplication ID: ${application.applicationId}\n\nPlease visit the school with the following original documents for verification:\n1. School Leaving Certificate\n2. Previous Class Result\n3. Character Certificate\n4. Aadhaar Card copy\n5. Category Certificate (if applicable)\n6. Bank Passbook copy\n\nYou can view and download your application form here:\n${downloadLink}\n\nRegards,\nGreen View Public School`;
+            
+            // Fire and forget
+            sendWhatsAppMessage(data.fatherMobile, message).catch(err => console.error('Failed to send WA message on submit:', err));
+        }
 
         res.status(201).json({ 
             success: true, 
             message: 'Application submitted successfully',
-            applicationId: application.applicationId
+            applicationId: application.applicationId,
+            _id: application._id
         });
     } catch (error: any) {
         console.error('Submit application error:', error);
+        if (uploadedCloudName && uploadedPublicId && usedCloudinaryInstance) {
+            try {
+                await usedCloudinaryInstance.uploader.destroy(uploadedPublicId);
+            } catch (cloudinaryError) {
+                console.error('Error cleaning up uploaded document:', cloudinaryError);
+            }
+        }
+        if (req.file) {
+            fs.promises.unlink(req.file.path).catch(() => {});
+        }
         res.status(500).json({ success: false, message: 'Failed to submit application', error: error.message });
     }
 };
@@ -92,6 +167,43 @@ export const getApplication = async (req: Request, res: Response): Promise<void>
     }
 };
 
+import { generateApplicationPdf } from '../services/pdfService';
+
+export const downloadApplicationPdf = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const application = await AdmissionApplication.findById(req.params.id);
+        if (!application) {
+            res.status(404).json({ success: false, message: 'Application not found' });
+            return;
+        }
+
+        // Generate PDF buffer on the fly using pdfkit
+        const pdfBuffer = await generateApplicationPdf(application);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="application_${application.applicationId}.pdf"`);
+        res.status(200).send(pdfBuffer);
+    } catch (error) {
+        console.error('Download application PDF error:', error);
+        res.status(500).json({ success: false, message: 'Failed to generate application PDF' });
+    }
+};
+
+export const getPublicApplication = async (req: Request, res: Response): Promise<void> => {
+    try {
+        // Find application by ID
+        const application = await AdmissionApplication.findById(req.params.id);
+        if (!application) {
+            res.status(404).json({ success: false, message: 'Application not found' });
+            return;
+        }
+        res.status(200).json({ success: true, application });
+    } catch (error) {
+        console.error('Get public application error:', error);
+        res.status(500).json({ success: false, message: 'Failed to get application' });
+    }
+};
+
 export const approveApplication = async (req: Request, res: Response): Promise<void> => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -120,10 +232,21 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
         }
 
         // 1. Create or Find User
-        let user = await User.findOne({ phone: app.fatherMobile }).session(session);
+        let user = null;
+        if (app.aadhaarNumber) {
+            user = await User.findOne({ "studentProfile.aadhaarNumber": app.aadhaarNumber, role: 'student' }).session(session);
+        }
+
         if (!user) {
+            let phoneToUse = app.fatherMobile;
+            const existingPhoneUser = await User.findOne({ phone: phoneToUse }).session(session);
+            if (existingPhoneUser) {
+                // Sibling already registered with this phone number, append aadhaar to bypass unique constraint
+                phoneToUse = `${app.fatherMobile}_${app.aadhaarNumber || app._id.toString()}`;
+            }
+
             user = new User({
-                phone: app.fatherMobile,
+                phone: phoneToUse,
                 role: 'student',
                 name: app.studentName,
                 photoUrl: app.photoUrl,
@@ -169,31 +292,39 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
             await user.save({ session });
         }
 
-        // 2. Create StudentSession
-        // Generate Card No (e.g. NUR-001)
-        const classPrefix = classDoc.className.substring(0, 3).toUpperCase();
-        const lastStudentSession = await StudentSession.findOne({ 
-            sessionId: activeSession._id,
-            cardNo: new RegExp(`^${classPrefix}-`)
-        }).sort({ cardNo: -1 }).session(session);
+        // 2. Create or find StudentSession
+        let studentSession = await StudentSession.findOne({ 
+            userId: user._id, 
+            sessionId: activeSession._id 
+        }).session(session);
 
-        let nextCardNum = 1;
-        if (lastStudentSession) {
-            const parts = lastStudentSession.cardNo.split('-');
-            if (parts.length > 1) {
-                nextCardNum = parseInt(parts[1], 10) + 1;
+        if (!studentSession) {
+            // Generate Card No (e.g. NUR-001)
+            const classPrefix = classDoc.className.substring(0, 3).toUpperCase();
+            const lastStudentSession = await StudentSession.findOne({ 
+                sessionId: activeSession._id,
+                cardNo: new RegExp(`^${classPrefix}-`)
+            }).sort({ cardNo: -1 }).session(session);
+
+            let nextCardNum = 1;
+            if (lastStudentSession) {
+                const parts = lastStudentSession.cardNo.split('-');
+                if (parts.length > 1) {
+                    nextCardNum = parseInt(parts[1], 10) + 1;
+                }
             }
-        }
-        const cardNo = `${classPrefix}-${nextCardNum.toString().padStart(3, '0')}`;
+            const cardNo = `${classPrefix}-${nextCardNum.toString().padStart(3, '0')}`;
 
-        const studentSession = new StudentSession({
-            userId: user._id,
-            sessionId: activeSession._id,
-            classId: classDoc._id,
-            cardNo,
-            dateOfAdmission: new Date()
-        });
-        await studentSession.save({ session });
+            studentSession = new StudentSession({
+                userId: user._id,
+                sessionId: activeSession._id,
+                classId: classDoc._id,
+                cardNo,
+                station: app.station || undefined,
+                dateOfAdmission: new Date()
+            });
+            await studentSession.save({ session });
+        }
 
         // 3. Generate FeeStructures
         // We assume admission month is April (index 0) for new admissions in standard cycle.
@@ -210,6 +341,12 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
 
         await session.commitTransaction();
         session.endSession();
+
+        // Send WhatsApp notification
+        if (app.fatherMobile) {
+            const message = `Hello ${app.studentName || 'Student'},\n\nCongratulations! Your admission application (${app.applicationId}) for ${app.appliedClass} has been APPROVED.\n\nYou are now officially registered for the ${app.sessionYear} session.\n\nRegards,\nGreen View Public School`;
+            sendWhatsAppMessage(app.fatherMobile, message).catch(err => console.error('Failed to send WA message on approve:', err));
+        }
 
         res.status(200).json({ 
             success: true, 

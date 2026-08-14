@@ -25,7 +25,12 @@ import authRoutes from './erp/routes/authRoutes';
 import admissionRoutes from './erp/routes/admissionRoutes';
 import erpRoutes from './erp/routes/index';
 import feeRoutes from './erp/routes/feeRoutes';
+import stationPublicRoutes from './erp/routes/stationPublic';
+import whatsappRoutes from './erp/routes/whatsappRoutes';
 import { seedClasses } from './erp/services/seedClasses';
+import { seedStations } from './erp/services/seedStations';
+import { initWhatsApp } from './erp/services/whatsappService';
+import { initFeeAutomationCron } from './erp/services/feeAutomationCron';
 
 const app = express();
 
@@ -48,9 +53,11 @@ app.use('/api/top-results', topResultRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admissions', admissionRoutes);
 app.use('/api/erp', erpRoutes);
+app.use('/api/erp/whatsapp', whatsappRoutes);
 app.use('/api/fees', feeRoutes);
 import paymentRoutes from './erp/routes/paymentRoutes';
 app.use('/api/payments', paymentRoutes);
+app.use('/api/stations', stationPublicRoutes);
 
 app.get('/', (req, res) => {
     res.send('Hello, World!');
@@ -61,4 +68,9 @@ const PORT = 8000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     seedClasses();
+    seedStations();
+    
+    // Initialize WhatsApp and Cron Automation
+    initWhatsApp();
+    initFeeAutomationCron();
 });
