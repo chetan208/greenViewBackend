@@ -2,10 +2,12 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
 async function connectToDatabase() {
     try {
@@ -34,9 +36,30 @@ import { initFeeAutomationCron } from './erp/services/feeAutomationCron';
 
 const app = express();
 
+// Security HTTP headers
+app.use(helmet());
+
+// Global Rate Limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
+
+// OTP specific rate limiting
+const otpLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5, // Limit each IP to 5 OTP requests per hour
+    message: 'Too many OTP requests from this IP, please try again after an hour.'
+});
+app.use('/api/auth/send-otp', otpLimiter);
+
 // Enable CORS for frontend & client requests
 app.use(cors({
-    origin: true,
+    origin: process.env.NODE_ENV === 'production' 
+        ? ['https://greenviewschool.com', 'https://erp.greenviewschool.com', process.env.FRONTEND_URL || ''] 
+        : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
@@ -60,10 +83,20 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/stations', stationPublicRoutes);
 
 app.get('/', (req, res) => {
-    res.send('Hello, World!');
+    res.send('Green View ERP API is running!');
 });
 
-const PORT = 8000;
+// Global Error Handler
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error('Unhandled Error:', err);
+    res.status(500).json({
+        success: false,
+        message: 'Internal Server Error',
+        error: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message
+    });
+});
+
+const PORT = process.env.PORT || 8000;
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

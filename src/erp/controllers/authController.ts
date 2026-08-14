@@ -27,11 +27,12 @@ export const sendOtp = async (req: Request, res: Response): Promise<void> => {
 
         await sendOtpSms(phone, otp);
 
-        // DEV MODE: Return OTP in response
+        // Return OTP in response for testing in production
+        console.log(`[OTP GENERATED] Phone: ${phone}, OTP: ${otp}`);
         res.status(200).json({ 
             success: true, 
             message: 'OTP sent successfully',
-            otp: process.env.NODE_ENV !== 'production' ? otp : undefined 
+            otp: otp 
         });
     } catch (error) {
         console.error('Send OTP error:', error);
