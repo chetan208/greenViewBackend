@@ -3,8 +3,12 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import WhatsAppSession from '../../model/erpModels/whatsappSession';
 
-// Silent logger
-const logger = pino({ level: 'info' });
+// ─── Environment Detection ───
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+const ENV_LABEL = IS_PRODUCTION ? '🟢 PRODUCTION' : '🟡 DEV';
+
+// ─── Silent logger — suppresses all Baileys internal noise ───
+const logger = pino({ level: 'silent' });
 
 let sock: any = null;
 let isConnected = false;
@@ -12,32 +16,28 @@ let qrCodeData: string | null = null;
 let connectionInfo: any = null;
 let isLoggingOut = false;
 let reconnectAttempts = 0;
+let isDestroyed = false;
 
-// Write queue to prevent DB overwhelm
+// ─── DB Write Queue ───
 let dbWriteQueue: Array<() => Promise<void>> = [];
 let isProcessingQueue = false;
-
-// The critical fix: If destroyed, ignore all save requests from Baileys
-let isDestroyed = false;
 
 const processQueue = async () => {
     if (isProcessingQueue) return;
     isProcessingQueue = true;
     while (dbWriteQueue.length > 0) {
         if (isDestroyed) {
-            // Drop tasks if session is being destroyed
             dbWriteQueue.length = 0;
             break;
         }
         const task = dbWriteQueue.shift();
         if (task) {
-            try { await task(); } catch (e) { console.error("WhatsApp DB Task Error:", e); }
+            try { await task(); } catch (_) { /* silently skip failed DB writes */ }
         }
     }
     isProcessingQueue = false;
 };
 
-// Wait for the queue to empty
 const waitForQueueDrain = async (): Promise<void> => {
     return new Promise(resolve => {
         const check = () => {
@@ -48,15 +48,16 @@ const waitForQueueDrain = async (): Promise<void> => {
     });
 };
 
+// ─── MongoDB Auth State ───
 const useMongoAuthState = async (sessionId: string) => {
     const cache = new Map<string, string>();
 
     try {
         const sessions = await WhatsAppSession.find({ sessionId });
         sessions.forEach(s => cache.set(s.dataKey, s.value));
-        console.log(`Loaded ${sessions.length} WhatsApp session keys from MongoDB for ${sessionId}.`);
+        console.log(`[WhatsApp] Loaded ${sessions.length} session keys (${sessionId})`);
     } catch(e) {
-        console.error("Failed to preload session from MongoDB:", e);
+        console.error(`[WhatsApp] Failed to load session:`, e);
     }
 
     const writeData = async (data: any, id: string) => {
@@ -64,22 +65,19 @@ const useMongoAuthState = async (sessionId: string) => {
         try {
             const value = JSON.stringify(data, BufferJSON.replacer);
             const category = id.split('-')[0];
-            
             await WhatsAppSession.findOneAndUpdate(
                 { sessionId, dataKey: id },
                 { sessionId, dataKey: id, category, value },
                 { upsert: true, new: true }
             );
-        } catch (error) {
-            console.error("Mongo Auth State Write Error:", error);
-        }
+        } catch (_) { /* silently skip */ }
     };
 
     const removeData = async (id: string) => {
         if (isDestroyed) return;
         try {
             await WhatsAppSession.deleteOne({ sessionId, dataKey: id });
-        } catch (e) {}
+        } catch (_) {}
     };
 
     let credsStr = cache.get(`creds`);
@@ -133,16 +131,26 @@ const useMongoAuthState = async (sessionId: string) => {
     };
 };
 
+// ─── Get Session ID (isolated per environment) ───
+const getSessionId = (): string => {
+    if (process.env.WHATSAPP_SESSION_ID) return process.env.WHATSAPP_SESSION_ID;
+    return IS_PRODUCTION ? 'greenview_production_session' : 'greenview_dev_session';
+};
+
+// ─── Init WhatsApp Connection ───
 export const initWhatsApp = async () => {
     try {
         isDestroyed = false;
-        const sessionId = process.env.WHATSAPP_SESSION_ID || 'greenview_erp_session';
+        const sessionId = getSessionId();
+        
+        console.log(`\n[WhatsApp] ${ENV_LABEL} — Connecting (session: ${sessionId})`);
+        
         const { state, saveCreds } = await useMongoAuthState(sessionId);
         
         const makeSocket = (makeWASocket as any).default || makeWASocket;
         sock = makeSocket({
             auth: state,
-            printQRInTerminal: true,
+            printQRInTerminal: false,
             logger: logger,
             browser: ['Ubuntu', 'Chrome', '20.0.04'],
             syncFullHistory: false,
@@ -155,24 +163,27 @@ export const initWhatsApp = async () => {
             const { connection, lastDisconnect, qr } = update;
 
             if (qr) {
-                console.log('WhatsApp QR Code received. Please scan:');
-                QRCode.toString(qr, { type: 'terminal', small: true }).then(str => {
-                    console.log(str);
-                }).catch(err => console.error("Terminal QR failed", err));
+                console.log(`[WhatsApp] QR Code received — scan from ERP dashboard or terminal.`);
+                
+                // Only print QR in terminal for dev mode
+                if (!IS_PRODUCTION) {
+                    QRCode.toString(qr, { type: 'terminal', small: true }).then(str => {
+                        console.log(str);
+                    }).catch(() => {});
+                }
 
                 QRCode.toDataURL(qr).then(url => {
                     qrCodeData = url;
-                    console.log('QR Code data URL generated successfully.');
-                }).catch(e => {
-                    console.error("QR generation failed", e);
-                });
+                }).catch(() => {});
+                
                 isConnected = false;
                 connectionInfo = null;
             }
 
             if (connection === 'close') {
-                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-                console.log('🔄 WhatsApp Connection closed. Reconnecting:', shouldReconnect);
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                
                 isConnected = false;
                 connectionInfo = null;
                 
@@ -184,14 +195,14 @@ export const initWhatsApp = async () => {
                 if (shouldReconnect && !isDestroyed && !isLoggingOut) {
                     reconnectAttempts++;
                     const delay = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 60000);
-                    console.log(`⏳ Reconnecting in ${delay/1000}s`);
+                    console.log(`[WhatsApp] Reconnecting in ${delay/1000}s (attempt ${reconnectAttempts})`);
                     setTimeout(initWhatsApp, delay);
                 } else if (!isDestroyed && !shouldReconnect) {
-                    // Logged out from phone
-                    logoutWhatsApp().catch(e => console.error(e));
+                    console.log(`[WhatsApp] Session logged out from phone. Cleaning up...`);
+                    logoutWhatsApp().catch(() => {});
                 }
             } else if (connection === 'open') {
-                console.log('\n✅ WhatsApp Client is fully authenticated and ready!');
+                console.log(`[WhatsApp] ✅ Connected and ready! (${ENV_LABEL})`);
                 isConnected = true;
                 qrCodeData = null;
                 connectionInfo = sock.user;
@@ -204,10 +215,11 @@ export const initWhatsApp = async () => {
         });
 
     } catch (error) {
-        console.error('Failed to initialize WhatsApp socket:', error);
+        console.error('[WhatsApp] Init failed:', error);
     }
 };
 
+// ─── Status ───
 export const getWhatsAppStatus = () => {
     return {
         connected: isConnected,
@@ -216,6 +228,7 @@ export const getWhatsAppStatus = () => {
     };
 };
 
+// ─── Logout ───
 export const logoutWhatsApp = async () => {
     if (isLoggingOut) return { success: false, error: "Logout already in progress" };
     isLoggingOut = true;
@@ -224,12 +237,11 @@ export const logoutWhatsApp = async () => {
         if (sock) {
             sock.ev.removeAllListeners('connection.update');
             sock.ev.removeAllListeners('creds.update');
-            try { await sock.logout(); } catch (e) {}
-            try { sock.end(); } catch (e) {}
+            try { await sock.logout(); } catch (_) {}
+            try { sock.end(); } catch (_) {}
             sock = null;
         }
 
-        // Wait for any pending writes to finish, then set destroyed to block new writes
         await waitForQueueDrain();
         isDestroyed = true;
         dbWriteQueue.length = 0;
@@ -238,11 +250,10 @@ export const logoutWhatsApp = async () => {
         qrCodeData = null;
         connectionInfo = null;
 
-        const sessionId = process.env.WHATSAPP_SESSION_ID || 'greenview_erp_session';
+        const sessionId = getSessionId();
         await WhatsAppSession.deleteMany({ sessionId });
-        console.log(`Cleaned up WhatsApp database session for ${sessionId}`);
+        console.log(`[WhatsApp] Session cleaned up (${sessionId})`);
 
-        // Restart socket after a short delay
         setTimeout(() => {
             isLoggingOut = false;
             initWhatsApp();
@@ -250,16 +261,17 @@ export const logoutWhatsApp = async () => {
 
         return { success: true };
     } catch (error: any) {
-        console.error("Error logging out WhatsApp:", error);
+        console.error("[WhatsApp] Logout error:", error);
         isLoggingOut = false;
         return { success: false, error: error.message };
     }
 };
 
+// ─── Send Message ───
 export const sendWhatsAppMessage = async (number: string, message: string) => {
     try {
         if (!sock || !isConnected) {
-            return { success: false, error: "WhatsApp service is not connected." };
+            return { success: false, error: "WhatsApp not connected." };
         }
 
         if (!number || typeof number !== 'string') {
@@ -271,9 +283,10 @@ export const sendWhatsAppMessage = async (number: string, message: string) => {
         const jid = `${cleanNumber}@s.whatsapp.net`;
 
         await sock.sendMessage(jid, { text: message });
+        console.log(`[WhatsApp] ✉ Message sent to ${cleanNumber.slice(-4).padStart(cleanNumber.length, '*')}`);
         return { success: true, status: "Sent" };
     } catch (error: any) {
-        console.error(`Failed to send WhatsApp to ${number}:`, error);
+        console.error(`[WhatsApp] Send failed (${number}):`, error.message);
         return { success: false, error: error.message };
     }
 };
