@@ -3,9 +3,9 @@ import Class from '../../model/erpModels/class';
 export const seedClasses = async () => {
     const DEFAULT_CLASSES = [
         "Nursery", "LKG", "UKG",
-        "Class I", "Class II", "Class III", "Class IV", "Class V",
-        "Class VI", "Class VII", "Class VIII", "Class IX", "Class X",
-        "Class XI", "Class XII"
+        "Class 1", "Class 2", "Class 3", "Class 4", "Class 5",
+        "Class 6", "Class 7", "Class 8", "Class 9", "Class 10",
+        "Class 11", "Class 12"
     ];
 
     try {

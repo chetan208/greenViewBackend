@@ -36,25 +36,6 @@ import { initFeeAutomationCron } from './erp/services/feeAutomationCron';
 
 const app = express();
 
-// Security HTTP headers
-app.use(helmet());
-
-// Global Rate Limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api/', limiter);
-
-// OTP specific rate limiting
-const otpLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 5, // Limit each IP to 5 OTP requests per hour
-    message: 'Too many OTP requests from this IP, please try again after an hour.'
-});
-app.use('/api/auth/send-otp', otpLimiter);
-
 // Enable CORS for frontend & client requests
 const allowedOrigins = [
     'https://greenviewschool.in',
@@ -87,6 +68,28 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
 }));
+
+// Security HTTP headers
+app.use(helmet());
+
+// Trust proxy is required when hosted on Render/Vercel so rate limiter sees client IP, not load balancer IP
+app.set('trust proxy', 1);
+
+// Global Rate Limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 500, // Limit each IP to 500 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/api/', limiter);
+
+// OTP specific rate limiting
+const otpLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5, // Limit each IP to 5 OTP requests per hour
+    message: 'Too many OTP requests from this IP, please try again after an hour.'
+});
+app.use('/api/auth/send-otp', otpLimiter);
 
 app.use(express.json());
 app.use(cookieParser());

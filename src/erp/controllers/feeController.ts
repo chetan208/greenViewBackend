@@ -5,8 +5,19 @@ import Payment from '../../model/erpModels/payment';
 export const getStudentFees = async (req: Request, res: Response): Promise<void> => {
     try {
         const { studentSessionId } = req.params;
-        const fees = await FeeStructure.find({ studentSessionId }).sort({ createdAt: 1 });
+        let fees = await FeeStructure.find({ studentSessionId }).sort({ createdAt: 1 });
         
+        // Auto-generate fees if none exist
+        if (fees.length === 0) {
+            const StudentSession = require('../../model/erpModels/studentSession').default;
+            const studentSession = await StudentSession.findById(studentSessionId).populate('classId');
+            if (studentSession && studentSession.classId) {
+                const { generateFeeStructuresForSession } = require('../services/feeService');
+                await generateFeeStructuresForSession(studentSession, studentSession.classId.className, 0, studentSession.previousSessionDues || 0);
+                fees = await FeeStructure.find({ studentSessionId }).sort({ createdAt: 1 });
+            }
+        }
+
         // Also fetch payments for these fees to give a complete picture
         const feeIds = fees.map(f => f._id);
         const payments = await Payment.find({ feeStructureId: { $in: feeIds } });
