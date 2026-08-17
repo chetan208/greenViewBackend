@@ -29,8 +29,6 @@ import erpRoutes from './erp/routes/index';
 import feeRoutes from './erp/routes/feeRoutes';
 import stationPublicRoutes from './erp/routes/stationPublic';
 import whatsappRoutes from './erp/routes/whatsappRoutes';
-import { seedClasses } from './erp/services/seedClasses';
-import { seedStations } from './erp/services/seedStations';
 import { initWhatsApp } from './erp/services/whatsappService';
 import { initFeeAutomationCron } from './erp/services/feeAutomationCron';
 
@@ -126,8 +124,6 @@ const PORT = process.env.PORT || 8000;
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    seedClasses();
-    seedStations();
     
     // Initialize WhatsApp and Cron Automation
     initWhatsApp();

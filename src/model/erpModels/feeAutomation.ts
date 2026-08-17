@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export interface IFeeAutomationSettings extends Document<string> {
+export interface IFeeAutomationSettings {
     _id: string; // "singleton"
     isEnabled: boolean;
     startDay: number;

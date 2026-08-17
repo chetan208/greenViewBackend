@@ -137,7 +137,7 @@ export const updateMe = async (req: Request, res: Response): Promise<void> => {
         const user = await User.findByIdAndUpdate(
             req.user.userId,
             { $set: updateData },
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
         ).select('-otp -otpExpiry');
 
         if (!user) {

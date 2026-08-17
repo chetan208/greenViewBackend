@@ -108,3 +108,39 @@ export const generateFeeStructuresForSession = async (
         await FeeStructure.insertMany(feeStructures);
     }
 };
+
+export const syncPendingFeesAfterDiscountUpdate = async (studentSession: IStudentSession, className: string) => {
+    // 1. Fetch pending fees for this student session
+    const pendingFees = await FeeStructure.find({
+        studentSessionId: studentSession._id,
+        status: 'PENDING'
+    });
+
+    for (const fee of pendingFees) {
+        // We can determine if it was the admission month if it previously had one-time charges
+        // Alternatively, since calculateMonthlyFee recalculates EVERYTHING, we can just use the previous values to detect if it was an admission month.
+        // Wait, what if the discount brought the admission fee to 0? We can check if `tieBeltBooks` or `buildingFund` > 0, which are also one-time but not discountable.
+        // Or if ANY of the one-time charges were > 0.
+        const isAdmissionMonth = (fee.admissionFee > 0 || fee.annualCharges > 0 || fee.tieBeltBooks > 0 || fee.buildingFund > 0);
+        
+        const newFeeData = await calculateMonthlyFee(
+            studentSession,
+            fee.month,
+            className,
+            isAdmissionMonth,
+            fee.previousSessionDues
+        );
+
+        // Update the document
+        fee.tuitionFee = newFeeData.tuitionFee;
+        fee.admissionFee = newFeeData.admissionFee;
+        fee.examFee = newFeeData.examFee;
+        fee.schoolBusCharges = newFeeData.schoolBusCharges;
+        fee.computerFee = newFeeData.computerFee;
+        fee.annualCharges = newFeeData.annualCharges;
+        fee.ptmFine = newFeeData.ptmFine;
+        fee.total = newFeeData.total;
+        
+        await fee.save();
+    }
+};

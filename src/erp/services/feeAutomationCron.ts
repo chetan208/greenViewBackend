@@ -99,7 +99,7 @@ export const runFeeAutomation = async (ignoreWindow = false) => {
 
                     for (const pendingFee of allPendingFees) {
                         const total = pendingFee.total || 0;
-                        const paid = pendingFee.amountPaid || 0;
+                        const paid = (pendingFee as any).amountPaid || 0;
                         const rem = Math.round((total - paid) * 100) / 100;
                         
                         if (rem > 0) {

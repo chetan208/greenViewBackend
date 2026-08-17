@@ -42,7 +42,7 @@ export const updateStation = async (req: Request, res: Response): Promise<void> 
         const station = await TransportFee.findByIdAndUpdate(
             req.params.id,
             { amount },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         if (!station) {

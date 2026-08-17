@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import FeeStructure from '../../model/erpModels/feeStructure';
 import Payment from '../../model/erpModels/payment';
+import Session from '../../model/erpModels/session';
+import StudentSession from '../../model/erpModels/studentSession';
 
 export const getStudentFees = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -79,7 +81,7 @@ export const getFeeStats = async (req: Request, res: Response): Promise<void> =>
         }
 
         // Find session ID
-        const sessionRecord = await Session.findOne({ year: session });
+        const sessionRecord = await Session.findOne({ year: session as string });
         if (!sessionRecord) {
              res.status(404).json({ success: false, message: 'Session not found' });
              return;

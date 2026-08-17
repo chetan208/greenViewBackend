@@ -3,7 +3,7 @@ import mongoose , { Document, Schema } from 'mongoose';
 export interface ITopResult extends Document {
     name: string;
     class: string;
-    marks: number;
+    marks?: number;
     percentage: number;
     imageUrl: string;
     imagePublicId: string;
@@ -24,7 +24,7 @@ const topResultSchema : Schema<ITopResult> = new Schema({
     },
     marks: {
         type: Number,
-        required: true
+        required: false
     },
     percentage: {
         type: Number,

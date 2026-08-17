@@ -5,7 +5,7 @@ import Session from '../../model/erpModels/session';
 import Class from '../../model/erpModels/class';
 import StudentSession from '../../model/erpModels/studentSession';
 import FeeStructure from '../../model/erpModels/feeStructure';
-import { generateFeeStructuresForSession } from '../services/feeService';
+import { generateFeeStructuresForSession, syncPendingFeesAfterDiscountUpdate } from '../services/feeService';
 
 import { sendWhatsAppMessage } from '../services/whatsappService';
 
@@ -194,11 +194,102 @@ export const getStudentById = async (req: Request, res: Response): Promise<void>
 };
 
 export const updateStudent = async (req: Request, res: Response): Promise<void> => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    
     try {
-        // Implement updating both User profile and StudentSession discounts
-        // Sync pending fees if discounts change
-        res.status(501).json({ success: false, message: 'Update student pending implementation' });
+        const studentSession = await StudentSession.findById(req.params.id)
+            .populate('classId')
+            .session(session);
+
+        if (!studentSession) {
+            res.status(404).json({ success: false, message: 'Student session not found' });
+            return;
+        }
+
+        const user = await User.findById(studentSession.userId).session(session);
+        if (!user) {
+            res.status(404).json({ success: false, message: 'Student user profile not found' });
+            return;
+        }
+
+        const data = req.body;
+
+        // 1. Update User Profile
+        if (data.name !== undefined) user.name = data.name;
+        if (data.contactNo !== undefined) {
+            const currentBasePhone = (user.phone || '').split('_')[0];
+            if (data.contactNo !== currentBasePhone) {
+                user.phone = data.contactNo;
+            }
+        }
+        
+        const profileFields = [
+            'fatherName', 'motherName', 'dob', 'sex', 'religion', 'socialCategory', 
+            'motherTongue', 'address', 'prevSchoolName', 'aadhaarNumber',
+            'fatherMobile', 'motherMobile', 'guardianName', 'guardianMobile',
+            'village', 'postOffice', 'tehsil', 'district', 'state', 'pinCode'
+        ];
+
+        if (!user.studentProfile) user.studentProfile = {} as any;
+
+        profileFields.forEach(field => {
+            if (data[field] !== undefined) {
+                (user.studentProfile as any)[field] = data[field];
+            }
+        });
+
+        await user.save({ session });
+
+        // 2. Update StudentSession
+        let discountsChanged = false;
+        const sessionFields = [
+            'section', 'cardNo', 'station',
+            'discountTuition', 'discountBus', 'discountAdmission',
+            'discountAnnual', 'discountExam', 'discountComputer'
+        ];
+
+        sessionFields.forEach(field => {
+            if (data[field] !== undefined) {
+                if (field.startsWith('discount') && (studentSession as any)[field] !== Number(data[field])) {
+                    discountsChanged = true;
+                }
+                if (field.startsWith('discount')) {
+                    (studentSession as any)[field] = Number(data[field]) || 0;
+                } else {
+                    (studentSession as any)[field] = data[field];
+                }
+            }
+        });
+
+        // if classId is updated
+        if (data.classId && data.classId !== (studentSession.classId as any)._id.toString()) {
+            studentSession.classId = new mongoose.Types.ObjectId(data.classId);
+            discountsChanged = true; // changing class also recalculates fees
+        }
+        
+        // if station is updated
+        if (data.station !== undefined && data.station !== studentSession.station) {
+            discountsChanged = true;
+        }
+
+        await studentSession.save({ session });
+
+        // 3. Sync Pending Fees if needed
+        if (discountsChanged) {
+            // Need to populate classId to get the className for calculateMonthlyFee
+            await studentSession.populate('classId');
+            const className = (studentSession.classId as any).className;
+            await syncPendingFeesAfterDiscountUpdate(studentSession, className);
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+
+        res.status(200).json({ success: true, message: 'Student profile updated successfully' });
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         console.error('Update student error:', error);
         res.status(500).json({ success: false, message: 'Failed to update student' });
     }

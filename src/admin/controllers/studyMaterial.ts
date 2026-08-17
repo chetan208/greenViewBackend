@@ -395,7 +395,7 @@ export const incrementDownloadCount = async (req: Request, res: Response) => {
         const material = await StudyMaterial.findByIdAndUpdate(
             req.params.id,
             { $inc: { downloadsCount: 1 } },
-            { new: true }
+            { returnDocument: 'after' }
         );
         res.status(200).json({ success: true, downloadsCount: material?.downloadsCount || 0 });
     } catch (error: any) {
@@ -412,7 +412,7 @@ export const incrementViewCount = async (req: Request, res: Response) => {
         const material = await StudyMaterial.findByIdAndUpdate(
             req.params.id,
             { $inc: { viewsCount: 1 } },
-            { new: true }
+            { returnDocument: 'after' }
         );
         res.status(200).json({ success: true, viewsCount: material?.viewsCount || 0 });
     } catch (error: any) {

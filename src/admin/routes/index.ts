@@ -29,6 +29,7 @@ import {
     deleteStudyMaterial,
     seedDefaultStructure
 } from '@/admin/controllers/studyMaterial';
+import { createTopResult, deleteTopResult } from '@/admin/controllers/topResult';
 import upload from '../../../config/upload';
 
 const router = Router();
@@ -69,5 +70,9 @@ router.post('/study-material', upload.single('pdf'), createStudyMaterial);
 router.put('/study-material/:id', upload.single('pdf'), updateStudyMaterial);
 router.delete('/study-material/:id', deleteStudyMaterial);
 router.post('/study-material/seed-default', seedDefaultStructure);
+
+// ==================== TOP RESULT ADMIN ROUTES ====================
+router.post('/top-result', upload.single('image'), createTopResult);
+router.delete('/top-result/:id', deleteTopResult);
 
 export default router;

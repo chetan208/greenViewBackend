@@ -68,7 +68,7 @@ const useMongoAuthState = async (sessionId: string) => {
             await WhatsAppSession.findOneAndUpdate(
                 { sessionId, dataKey: id },
                 { sessionId, dataKey: id, category, value },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
         } catch (_) { /* silently skip */ }
     };

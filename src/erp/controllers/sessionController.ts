@@ -52,12 +52,37 @@ export const updateSession = async (req: Request, res: Response): Promise<void> 
         const session = await Session.findByIdAndUpdate(
             req.params.id,
             { isActive },
-            { new: true }
+            { returnDocument: 'after' }
         );
 
         res.status(200).json({ success: true, message: 'Session updated successfully', session });
     } catch (error) {
         console.error('Update session error:', error);
         res.status(500).json({ success: false, message: 'Failed to update session' });
+    }
+};
+
+export const getAdmissionStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const activeSession = await Session.findOne({ isActive: true });
+        res.status(200).json({ success: true, open: activeSession?.admissionsOpen || false });
+    } catch (error) {
+        console.error('Get admission status error:', error);
+        res.status(500).json({ success: false, message: 'Failed to get admission status', open: false });
+    }
+};
+
+export const toggleAdmissionStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { admissionsOpen } = req.body;
+        const session = await Session.findByIdAndUpdate(
+            req.params.id,
+            { admissionsOpen },
+            { returnDocument: 'after' }
+        );
+        res.status(200).json({ success: true, message: 'Admission status updated successfully', session });
+    } catch (error) {
+        console.error('Toggle admission status error:', error);
+        res.status(500).json({ success: false, message: 'Failed to toggle admission status' });
     }
 };

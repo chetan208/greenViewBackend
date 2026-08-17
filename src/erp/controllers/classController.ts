@@ -45,7 +45,7 @@ export const updateClass = async (req: Request, res: Response): Promise<void> =>
         const updated = await Class.findByIdAndUpdate(
             id,
             { $set: { className, sections } },
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
         );
 
         if (!updated) {
@@ -72,7 +72,7 @@ export const updateClassDefaults = async (req: Request, res: Response): Promise<
         const updated = await Class.findOneAndUpdate(
             { className },
             { $set: fees },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
 
         res.status(200).json({ success: true, message: 'Class defaults updated', class: updated });
@@ -107,7 +107,7 @@ export const updateMonthlyOverride = async (req: Request, res: Response): Promis
         const updated = await ClassMonthlyFee.findOneAndUpdate(
             { className, monthName },
             { $set: fees },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
 
         res.status(200).json({ success: true, message: 'Monthly override updated', override: updated });

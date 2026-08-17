@@ -6,7 +6,7 @@ import Session from '../../model/erpModels/session';
 import Class from '../../model/erpModels/class';
 import StudentSession from '../../model/erpModels/studentSession';
 import { generateFeeStructuresForSession } from '../services/feeService';
-import { getNextCloudinaryInstance } from '../../../config/cloudinary';
+import { getNextCloudinaryInstance, getCloudinaryInstanceByName } from '../../../config/cloudinary';
 import { sendWhatsAppMessage } from '../services/whatsappService';
 
 // Generate application ID like PR-2026-001 or SR-2026-001
@@ -237,6 +237,27 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
             user = await User.findOne({ "studentProfile.aadhaarNumber": app.aadhaarNumber, role: 'student' }).session(session);
         }
 
+        let finalPhotoUrl = app.photoUrl;
+        let finalPhotoPublicId = app.photoPublicId;
+
+        // Move image from admissions to students folder
+        if (app.photoPublicId && app.cloudName) {
+            try {
+                const cloudinaryInstance = getCloudinaryInstanceByName(app.cloudName);
+                if (cloudinaryInstance) {
+                    const oldId = app.photoPublicId;
+                    const newId = oldId.replace(/^admissions\//, 'students/');
+                    if (newId !== oldId) {
+                        const renameResult = await cloudinaryInstance.cloudinary.uploader.rename(oldId, newId);
+                        finalPhotoUrl = renameResult.secure_url;
+                        finalPhotoPublicId = renameResult.public_id;
+                    }
+                }
+            } catch (err) {
+                console.error("Cloudinary rename failed:", err);
+            }
+        }
+
         if (!user) {
             let phoneToUse = app.fatherMobile;
             const existingPhoneUser = await User.findOne({ phone: phoneToUse }).session(session);
@@ -249,8 +270,8 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
                 phone: phoneToUse,
                 role: 'student',
                 name: app.studentName,
-                photoUrl: app.photoUrl,
-                photoPublicId: app.photoPublicId,
+                photoUrl: finalPhotoUrl,
+                photoPublicId: finalPhotoPublicId,
                 cloudName: app.cloudName,
                 studentProfile: {
                     fatherName: app.fatherName,
@@ -332,12 +353,8 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
         // For now, generating from April.
         await generateFeeStructuresForSession(studentSession, classDoc.className, 0, 0);
 
-        // 4. Update Application
-        app.status = 'APPROVED';
-        app.approvedBy = new mongoose.Types.ObjectId(req.user?.userId);
-        app.approvedAt = new Date();
-        app.createdUserId = user._id as mongoose.Types.ObjectId;
-        await app.save({ session });
+        // 4. Delete Application from DB since it is approved
+        await AdmissionApplication.findByIdAndDelete(app._id).session(session);
 
         await session.commitTransaction();
         session.endSession();
@@ -380,11 +397,24 @@ export const rejectApplication = async (req: Request, res: Response): Promise<vo
         app.status = 'REJECTED';
         app.rejectionReason = reason;
         app.approvedBy = new mongoose.Types.ObjectId(req.user?.userId);
-        app.approvedAt = new Date();
+        app.status = 'REJECTED';
+        app.rejectionReason = reason;
         
-        await app.save();
+        if (app.photoPublicId && app.cloudName) {
+            try {
+                const cloudinaryInstance = getCloudinaryInstanceByName(app.cloudName);
+                if (cloudinaryInstance) {
+                    await cloudinaryInstance.cloudinary.uploader.destroy(app.photoPublicId);
+                }
+            } catch (err) {
+                console.error("Cloudinary deletion failed on reject:", err);
+            }
+        }
 
-        res.status(200).json({ success: true, message: 'Application rejected successfully' });
+        // We delete the application if rejected to clean up mongo db as well.
+        await AdmissionApplication.findByIdAndDelete(app._id);
+
+        res.status(200).json({ success: true, message: 'Application rejected and deleted successfully' });
     } catch (error) {
         console.error('Reject application error:', error);
         res.status(500).json({ success: false, message: 'Failed to reject application' });
@@ -406,6 +436,23 @@ export const getStats = async (req: Request, res: Response): Promise<void> => {
 
 export const deleteApplication = async (req: Request, res: Response): Promise<void> => {
     try {
+        const app = await AdmissionApplication.findById(req.params.id);
+        if (!app) {
+            res.status(404).json({ success: false, message: 'Application not found' });
+            return;
+        }
+
+        if (app.photoPublicId && app.cloudName) {
+            try {
+                const cloudinaryInstance = getCloudinaryInstanceByName(app.cloudName);
+                if (cloudinaryInstance) {
+                    await cloudinaryInstance.cloudinary.uploader.destroy(app.photoPublicId);
+                }
+            } catch (err) {
+                console.error("Cloudinary deletion failed on delete:", err);
+            }
+        }
+
         await AdmissionApplication.findByIdAndDelete(req.params.id);
         res.status(200).json({ success: true, message: 'Application deleted successfully' });
     } catch (error) {

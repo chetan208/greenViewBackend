@@ -70,7 +70,7 @@ router.post('/automation-settings', isAuthenticated, async (req: Request, res: R
         const settings = await FeeAutomationSetting.findByIdAndUpdate(
             'singleton',
             { isEnabled, startDay, windowDays },
-            { new: true, upsert: true }
+            { returnDocument: 'after', upsert: true }
         );
         res.status(200).json({ success: true, settings });
     } catch (error: any) {
