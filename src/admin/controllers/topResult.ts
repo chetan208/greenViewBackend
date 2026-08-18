@@ -57,7 +57,7 @@ export const createTopResult = async (req: Request, res: Response): Promise<void
         const newResult = new TopResult({
             name,
             class: className,
-            marks: Number(marks),
+            marks: marks ? Number(marks) : undefined,
             percentage: Number(percentage),
             imageUrl: result.secure_url,
             imagePublicId: result.public_id,
