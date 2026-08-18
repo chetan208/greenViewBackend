@@ -8,7 +8,8 @@ export interface TokenPayload {
     userId: string;
     phone: string;
     role: string;
-    accessRole?: string;
+    accessLevel?: string;
+    post?: string;
 }
 
 export const generateToken = (user: IUser): string => {
@@ -16,7 +17,8 @@ export const generateToken = (user: IUser): string => {
         userId: user._id.toString(),
         phone: user.phone,
         role: user.role,
-        accessRole: user.teacherProfile?.accessRole
+        accessLevel: user.accessLevel,
+        post: user.staffProfile?.post
     };
 
     return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] });

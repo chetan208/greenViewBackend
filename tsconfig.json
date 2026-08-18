@@ -6,11 +6,10 @@
     "strict": true,
     "esModuleInterop": true,
     "ignoreDeprecations": "6.0",
-
     "paths": {
       "@/*": ["./src/*"]
     },
     "skipLibCheck": true
-
-  }
+  },
+  "exclude": ["testDb.ts", "node_modules", "dist"]
 }

@@ -85,7 +85,8 @@ export const verifyOtp = async (req: Request, res: Response): Promise<void> => {
                 role: user.role,
                 phone: user.phone,
                 photoUrl: user.photoUrl,
-                accessRole: user.teacherProfile?.accessRole
+                accessLevel: user.accessLevel,
+                post: user.staffProfile?.post
             }
         });
     } catch (error) {
@@ -121,17 +122,17 @@ export const updateMe = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const { name, photoUrl, photoPublicId, teacherProfile } = req.body;
+        const { name, photoUrl, photoPublicId, staffProfile } = req.body;
         const updateData: any = {};
         
         if (name !== undefined) updateData.name = name;
         if (photoUrl !== undefined) updateData.photoUrl = photoUrl;
         if (photoPublicId !== undefined) updateData.photoPublicId = photoPublicId;
         
-        // Prevent changing accessRole, employeeId, or isPrincipal through this route
-        if (teacherProfile !== undefined) {
-            updateData['teacherProfile.subject'] = teacherProfile.subject;
-            updateData['teacherProfile.department'] = teacherProfile.department;
+        // Prevent changing accessLevel, employeeId, or isPrincipal through this route
+        if (staffProfile !== undefined) {
+            updateData['staffProfile.subject'] = staffProfile.subject;
+            updateData['staffProfile.department'] = staffProfile.department;
         }
 
         const user = await User.findByIdAndUpdate(

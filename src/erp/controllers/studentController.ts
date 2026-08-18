@@ -29,14 +29,24 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
         }
 
         // 1. Create or Find User
-        let user = await User.findOne({ phone: data.fatherMobile }).session(session);
+        const phone = data.contactNo || data.fatherMobile;
+        let user = await User.findOne({ phone: phone }).session(session);
+        
+        let photoUrl = data.photoUrl;
+        let photoPublicId = data.photoPublicId;
+        
+        if (req.file) {
+            photoUrl = req.file.path;
+            photoPublicId = req.file.filename;
+        }
+
         if (!user) {
             user = new User({
-                phone: data.fatherMobile,
+                phone: phone,
                 role: 'student',
-                name: data.studentName,
-                photoUrl: data.photoUrl,
-                photoPublicId: data.photoPublicId,
+                name: data.name || data.studentName,
+                photoUrl: photoUrl,
+                photoPublicId: photoPublicId,
                 cloudName: data.cloudName,
                 studentProfile: {
                     fatherName: data.fatherName,
@@ -222,6 +232,11 @@ export const updateStudent = async (req: Request, res: Response): Promise<void> 
             if (data.contactNo !== currentBasePhone) {
                 user.phone = data.contactNo;
             }
+        }
+        
+        if (req.file) {
+            user.photoUrl = req.file.path;
+            user.photoPublicId = req.file.filename;
         }
         
         const profileFields = [

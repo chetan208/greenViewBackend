@@ -57,8 +57,8 @@ export const isAdmin = (req: Request, res: Response, next: NextFunction): void =
         return;
     }
     
-    // Both Admin and Owner have admin privileges
-    if (req.user.accessRole === 'Admin' || req.user.accessRole === 'Owner') {
+    // Both admin and superadmin have admin privileges
+    if (req.user.accessLevel === 'admin' || req.user.accessLevel === 'superadmin') {
         next();
     } else {
         res.status(403).json({ success: false, message: 'Access denied: Requires Admin role' });
@@ -71,9 +71,9 @@ export const isOwner = (req: Request, res: Response, next: NextFunction): void =
         return;
     }
 
-    if (req.user.accessRole === 'Owner') {
+    if (req.user.accessLevel === 'superadmin') {
         next();
     } else {
-        res.status(403).json({ success: false, message: 'Access denied: Requires Owner role' });
+        res.status(403).json({ success: false, message: 'Access denied: Requires Superadmin role' });
     }
 };

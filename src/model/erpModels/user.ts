@@ -54,7 +54,8 @@ export interface IStudentProfile {
     interestInGames?: string;
 }
 
-export interface ITeacherProfile {
+export interface IStaffProfile {
+    isTeacher?: boolean;
     subject?: string;
     qualification?: string;
     department?: string;
@@ -62,12 +63,13 @@ export interface ITeacherProfile {
     joinDate?: Date;
     employeeId?: string;
     isPrincipal?: boolean;
-    accessRole?: 'Teacher' | 'Admin' | 'Owner';
+    post?: string;
 }
 
 export interface IUser extends Document {
     phone: string;
-    role: 'student' | 'teacher';
+    role: 'student' | 'user';
+    accessLevel?: 'staff' | 'admin' | 'superadmin' | 'student';
     otp?: string;
     otpExpiry?: Date;
     isActive: boolean;
@@ -79,7 +81,7 @@ export interface IUser extends Document {
     cloudName?: string;
 
     studentProfile?: IStudentProfile;
-    teacherProfile?: ITeacherProfile;
+    staffProfile?: IStaffProfile;
 
     createdAt: Date;
     updatedAt: Date;
@@ -139,7 +141,8 @@ const studentProfileSchema = new Schema<IStudentProfile>({
     interestInGames: String
 });
 
-const teacherProfileSchema = new Schema<ITeacherProfile>({
+const staffProfileSchema = new Schema<IStaffProfile>({
+    isTeacher: { type: Boolean, default: false },
     subject: String,
     qualification: String,
     department: String,
@@ -147,12 +150,14 @@ const teacherProfileSchema = new Schema<ITeacherProfile>({
     joinDate: Date,
     employeeId: String,
     isPrincipal: { type: Boolean, default: false },
-    accessRole: { type: String, enum: ['Teacher', 'Admin', 'Owner'], default: 'Teacher' }
+    post: String
+
 });
 
 const userSchema = new Schema<IUser>({
     phone: { type: String, required: true, unique: true, index: true },
-    role: { type: String, enum: ['student', 'teacher'], required: true, index: true },
+    role: { type: String, enum: ['student', 'user'], required: true, index: true },
+    accessLevel: { type: String, enum: ['staff', 'admin', 'superadmin', 'student'], default: 'student' },
     otp: String,
     otpExpiry: Date,
     isActive: { type: Boolean, default: true },
@@ -164,10 +169,10 @@ const userSchema = new Schema<IUser>({
     cloudName: String,
 
     studentProfile: studentProfileSchema,
-    teacherProfile: teacherProfileSchema,
+    staffProfile: staffProfileSchema,
 }, { timestamps: true });
 
-userSchema.index({ "teacherProfile.accessRole": 1 });
+userSchema.index({ "accessLevel": 1 });
 
 const User = mongoose.model<IUser>('User', userSchema);
 export default User;
