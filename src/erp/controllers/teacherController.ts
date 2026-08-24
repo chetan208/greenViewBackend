@@ -22,6 +22,19 @@ export const createTeacher = async (req: Request, res: Response): Promise<void> 
             photoPublicId = uploadResult.publicId;
         }
 
+        let parsedCategories: string[] = [];
+        if (data.teacherCategory) {
+            try {
+                parsedCategories = typeof data.teacherCategory === 'string'
+                    ? JSON.parse(data.teacherCategory)
+                    : data.teacherCategory;
+            } catch (e) {
+                parsedCategories = typeof data.teacherCategory === 'string'
+                    ? data.teacherCategory.split(',').map((c: string) => c.trim())
+                    : [data.teacherCategory];
+            }
+        }
+
         const user = new User({
             phone: data.phone,
             role: 'user',
@@ -40,7 +53,9 @@ export const createTeacher = async (req: Request, res: Response): Promise<void> 
                 joinDate: data.joinDate || new Date(),
                 employeeId: data.employeeId,
                 isPrincipal: data.isPrincipal === 'true' || data.isPrincipal === true,
-                post: data.post
+                post: data.post,
+                teacherCategory: parsedCategories,
+                experience: data.experience
             }
         });
 
@@ -54,8 +69,45 @@ export const createTeacher = async (req: Request, res: Response): Promise<void> 
 
 export const getTeachers = async (req: Request, res: Response): Promise<void> => {
     try {
-        const teachers = await User.find({ role: 'user' }).select('-otp -otpExpiry');
-        res.status(200).json({ success: true, teachers });
+        const { search, department, category, isTeacher } = req.query;
+        const filter: any = { role: 'user' };
+
+        if (isTeacher === 'true') {
+            filter['staffProfile.isTeacher'] = true;
+        }
+
+        if (department && department !== 'All') {
+            filter['staffProfile.department'] = department;
+        }
+        if (category) {
+            filter['staffProfile.teacherCategory'] = category;
+        }
+        if (search) {
+            filter['$or'] = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+                { phone: { $regex: search, $options: 'i' } },
+                { 'staffProfile.post': { $regex: search, $options: 'i' } },
+                { 'staffProfile.subject': { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const limitStr = req.query.limit as string;
+        const pageStr = req.query.page as string;
+
+        let query = User.find(filter).select('-otp -otpExpiry').sort({ createdAt: 1 });
+
+        if (limitStr && limitStr !== '0') {
+            const limit = parseInt(limitStr) || 12;
+            const page = parseInt(pageStr) || 1;
+            const skip = (page - 1) * limit;
+            query = query.skip(skip).limit(limit);
+        }
+
+        const teachers = await query;
+        const total = await User.countDocuments(filter);
+
+        res.status(200).json({ success: true, teachers, total });
     } catch (error) {
         console.error('Get staff error:', error);
         res.status(500).json({ success: false, message: 'Failed to get staff' });
@@ -100,6 +152,19 @@ export const updateTeacher = async (req: Request, res: Response): Promise<void> 
             teacher.photoPublicId = uploadResult.publicId;
         }
 
+        let parsedCategories: string[] | undefined = undefined;
+        if (data.teacherCategory !== undefined) {
+            try {
+                parsedCategories = typeof data.teacherCategory === 'string'
+                    ? JSON.parse(data.teacherCategory)
+                    : data.teacherCategory;
+            } catch (e) {
+                parsedCategories = typeof data.teacherCategory === 'string'
+                    ? data.teacherCategory.split(',').map((c: string) => c.trim())
+                    : [data.teacherCategory];
+            }
+        }
+
         if (data.name) teacher.name = data.name;
         if (data.email) teacher.email = data.email;
         if (data.phone) teacher.phone = data.phone;
@@ -111,6 +176,8 @@ export const updateTeacher = async (req: Request, res: Response): Promise<void> 
             if (data.qualification !== undefined) teacher.staffProfile.qualification = data.qualification;
             if (data.department !== undefined) teacher.staffProfile.department = data.department;
             if (data.post !== undefined) teacher.staffProfile.post = data.post;
+            if (parsedCategories !== undefined) teacher.staffProfile.teacherCategory = parsedCategories;
+            if (data.experience !== undefined) teacher.staffProfile.experience = data.experience;
         } else {
             // initialize if missing
             teacher.staffProfile = {
@@ -118,7 +185,9 @@ export const updateTeacher = async (req: Request, res: Response): Promise<void> 
                 subject: data.subject,
                 qualification: data.qualification,
                 department: data.department,
-                post: data.post
+                post: data.post,
+                teacherCategory: parsedCategories || [],
+                experience: data.experience
             };
         }
 

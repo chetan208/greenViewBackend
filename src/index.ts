@@ -31,7 +31,6 @@ import stationPublicRoutes from './erp/routes/stationPublic';
 import whatsappRoutes from './erp/routes/whatsappRoutes';
 import { initWhatsApp } from './erp/services/whatsappService';
 import { initFeeAutomationCron } from './erp/services/feeAutomationCron';
-import { migrateStations } from './erp/services/migrateStations';
 
 const app = express();
 
@@ -129,5 +128,4 @@ app.listen(PORT, () => {
     // Initialize WhatsApp and Cron Automation
     initWhatsApp();
     initFeeAutomationCron();
-    migrateStations();
 });

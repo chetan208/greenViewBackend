@@ -7,6 +7,7 @@ export interface ITransportFee extends Document {
     routeNumber?: string;
     routeCode?: string;
     pickupTime?: string;
+    order?: number;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -18,6 +19,7 @@ const transportFeeSchema = new Schema<ITransportFee>({
     routeNumber: { type: String },
     routeCode: { type: String },
     pickupTime: { type: String },
+    order: { type: Number, default: 0 },
 }, { timestamps: true });
 
 const TransportFee = mongoose.model<ITransportFee>('TransportFee', transportFeeSchema);

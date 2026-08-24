@@ -75,4 +75,11 @@ router.post('/study-material/seed-default', seedDefaultStructure);
 router.post('/top-result', upload.single('image'), createTopResult);
 router.delete('/top-result/:id', deleteTopResult);
 
+
+// ==================== HERO IMAGE ADMIN ROUTES ====================
+import { createHeroImage, deleteHeroImage, reorderHeroImages } from '../controllers/heroImage';
+router.post('/hero-image', upload.single('image'), createHeroImage);
+router.delete('/hero-image/:id', deleteHeroImage);
+router.put('/hero-image/reorder', reorderHeroImages);
+
 export default router;

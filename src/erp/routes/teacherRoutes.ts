@@ -11,13 +11,12 @@ import upload from '../../../config/upload';
 
 const router = express.Router();
 
-// All teacher routes require Owner access
-router.use(isAuthenticated, isOwner);
-
-router.post('/', upload.single('photo'), createTeacher);
+// GET methods are public, other methods (POST, PUT, DELETE) require Owner access
 router.get('/', getTeachers);
 router.get('/:id', getTeacherById);
-router.put('/:id', upload.single('photo'), updateTeacher);
-router.delete('/:id', deleteTeacher);
+
+router.post('/', isAuthenticated, isOwner, upload.single('photo'), createTeacher);
+router.put('/:id', isAuthenticated, isOwner, upload.single('photo'), updateTeacher);
+router.delete('/:id', isAuthenticated, isOwner, deleteTeacher);
 
 export default router;

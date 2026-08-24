@@ -64,6 +64,8 @@ export interface IStaffProfile {
     employeeId?: string;
     isPrincipal?: boolean;
     post?: string;
+    teacherCategory?: string[];
+    experience?: string;
 }
 
 export interface IUser extends Document {
@@ -150,8 +152,9 @@ const staffProfileSchema = new Schema<IStaffProfile>({
     joinDate: Date,
     employeeId: String,
     isPrincipal: { type: Boolean, default: false },
-    post: String
-
+    post: String,
+    teacherCategory: [String],
+    experience: String
 });
 
 const userSchema = new Schema<IUser>({
