@@ -11,13 +11,16 @@ export interface IFeeStructure extends Document {
     schoolBusCharges: number;
     ptmFine: number;
     computerFee: number;
-    tieBeltBooks: number;
-    buildingFund: number;
+    smartClassFee: number;
+    sportsFee: number;
+    lateFee: number;
     annualCharges: number;
+    otherCharges: number;
     previousSessionDues: number;
 
     total: number;
     status: 'PENDING' | 'PARTIALLY_PAID' | 'PAID';
+    isManuallyEdited?: boolean;
 
     createdAt: Date;
     updatedAt: Date;
@@ -34,13 +37,16 @@ const feeStructureSchema = new Schema<IFeeStructure>({
     schoolBusCharges: { type: Number, default: 0 },
     ptmFine: { type: Number, default: 0 },
     computerFee: { type: Number, default: 0 },
-    tieBeltBooks: { type: Number, default: 0 },
-    buildingFund: { type: Number, default: 0 },
+    smartClassFee: { type: Number, default: 0 },
+    sportsFee: { type: Number, default: 0 },
+    lateFee: { type: Number, default: 0 },
     annualCharges: { type: Number, default: 0 },
+    otherCharges: { type: Number, default: 0 },
     previousSessionDues: { type: Number, default: 0 },
 
     total: { type: Number, default: 0 },
     status: { type: String, enum: ['PENDING', 'PARTIALLY_PAID', 'PAID'], default: 'PENDING', index: true },
+    isManuallyEdited: { type: Boolean, default: false },
 }, { timestamps: true });
 
 feeStructureSchema.index({ studentSessionId: 1, month: 1 }, { unique: true });

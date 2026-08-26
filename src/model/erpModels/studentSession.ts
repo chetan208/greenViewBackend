@@ -15,6 +15,7 @@ export interface IStudentSession extends Document {
     discountAnnual: number;
     discountExam: number;
     discountComputer: number;
+    previousSessionDues?: number;
 
     createdAt: Date;
     updatedAt: Date;
@@ -35,6 +36,7 @@ const studentSessionSchema = new Schema<IStudentSession>({
     discountAnnual: { type: Number, default: 0 },
     discountExam: { type: Number, default: 0 },
     discountComputer: { type: Number, default: 0 },
+    previousSessionDues: { type: Number, default: 0 },
 }, { timestamps: true });
 
 studentSessionSchema.index({ userId: 1, sessionId: 1 }, { unique: true });

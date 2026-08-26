@@ -219,10 +219,17 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
             return;
         }
 
-        const activeSession = await Session.findOne({ year: app.sessionYear }).session(session);
+        const targetSessionYear = req.body.sessionYear || app.sessionYear;
+
+        let activeSession = await Session.findOne({ year: targetSessionYear }).session(session);
         if (!activeSession) {
-            res.status(400).json({ success: false, message: 'Session not found' });
-            return;
+            activeSession = new Session({
+                year: targetSessionYear,
+                isActive: true,
+                admissionsOpen: false
+            });
+            await activeSession.save({ session });
+            await Session.updateMany({ _id: { $ne: activeSession._id } }, { isActive: false }).session(session);
         }
 
         const classDoc = await Class.findOne({ className: app.appliedClass }).session(session);
@@ -351,7 +358,7 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
         // We assume admission month is April (index 0) for new admissions in standard cycle.
         // For mid-year, this logic might need refinement based on current date.
         // For now, generating from April.
-        await generateFeeStructuresForSession(studentSession, classDoc.className, 0, 0);
+        await generateFeeStructuresForSession(studentSession, classDoc.className, undefined, 0);
 
         // 4. Delete Application from DB since it is approved
         await AdmissionApplication.findByIdAndDelete(app._id).session(session);

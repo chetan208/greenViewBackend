@@ -16,13 +16,37 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
     try {
         const data = req.body;
         
-        let activeSession = await Session.findOne({ isActive: true }).session(session);
+        let targetSessionYear = data.sessionYear;
+        let activeSession;
+
+        if (targetSessionYear) {
+            activeSession = await Session.findOne({ year: targetSessionYear }).session(session);
+            if (!activeSession) {
+                activeSession = new Session({
+                    year: targetSessionYear,
+                    isActive: true,
+                    admissionsOpen: false
+                });
+                await activeSession.save({ session });
+                // Make it the only active session
+                await Session.updateMany({ _id: { $ne: activeSession._id } }, { isActive: false }).session(session);
+            }
+        } else {
+            activeSession = await Session.findOne({ isActive: true }).session(session);
+        }
+
         if (!activeSession) {
-            res.status(400).json({ success: false, message: 'No active session found' });
+            res.status(400).json({ success: false, message: 'No session found and none provided' });
             return;
         }
 
-        const classDoc = await Class.findById(data.classId).session(session);
+        let classDoc;
+        if (data.classId) {
+            classDoc = await Class.findById(data.classId).session(session);
+        } else if (data.className) {
+            classDoc = await Class.findOne({ className: data.className }).session(session);
+        }
+
         if (!classDoc) {
             res.status(400).json({ success: false, message: 'Class not found' });
             return;
@@ -108,20 +132,23 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
             classId: classDoc._id,
             section: data.section,
             cardNo,
-            dateOfAdmission: new Date(),
+            dateOfAdmission: data.admissionDate ? new Date(data.admissionDate) : (data.dateOfAdmission ? new Date(data.dateOfAdmission) : new Date()),
             station: data.station,
             discountTuition: data.discountTuition || 0,
             discountBus: data.discountBus || 0,
             discountAdmission: data.discountAdmission || 0,
             discountAnnual: data.discountAnnual || 0,
             discountExam: data.discountExam || 0,
-            discountComputer: data.discountComputer || 0
+            discountComputer: data.discountComputer || 0,
+            previousSessionDues: data.previousSessionDues || 0
         });
         await studentSession.save({ session });
 
-        // 3. Generate FeeStructures
-        const startMonthIndex = data.admissionMonthIndex || 0;
-        await generateFeeStructuresForSession(studentSession, classDoc.className, startMonthIndex, 0);
+        // 3. Generate FeeStructures starting from admission month
+        const startMonthIndex = (data.admissionMonthIndex !== undefined && data.admissionMonthIndex !== null)
+            ? Number(data.admissionMonthIndex)
+            : undefined;
+        await generateFeeStructuresForSession(studentSession, classDoc.className, startMonthIndex, data.previousSessionDues || 0);
 
         await session.commitTransaction();
         session.endSession();

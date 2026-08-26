@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import FeeStructure from '../../model/erpModels/feeStructure';
 import Payment from '../../model/erpModels/payment';
+import StudentSession from '../../model/erpModels/studentSession';
+import { sendWhatsAppMessage } from '../services/whatsappService';
 
 const generateReceiptNo = async (): Promise<string> => {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -21,37 +23,60 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
     session.startTransaction();
 
     try {
-        const { studentSessionId, amountPaid, paymentMode, feeStructureId } = req.body;
+        const { studentSessionId, studentId, amountPaid, paymentMode, feeStructureId } = req.body;
+        const targetId = studentSessionId || studentId || req.body.id;
 
-        if (!amountPaid || amountPaid <= 0) {
+        const numericAmount = parseFloat(amountPaid);
+        if (isNaN(numericAmount) || numericAmount <= 0) {
             res.status(400).json({ success: false, message: 'Invalid payment amount' });
             return;
         }
 
-        let pendingFees = [];
+        let studentSessionDoc = null;
+        if (targetId) {
+            studentSessionDoc = await StudentSession.findById(targetId).session(session);
+            if (!studentSessionDoc) {
+                studentSessionDoc = await StudentSession.findOne({ userId: targetId }).sort({ createdAt: -1 }).session(session);
+            }
+        }
+
+        let pendingFees: any[] = [];
         
-        // If specific fee structure is targeted, just pay that one
+        // 1. If specific fee structure is targeted, pay that one
         if (feeStructureId) {
             const fee = await FeeStructure.findById(feeStructureId).session(session);
-            if (!fee || fee.status === 'PAID') {
-                res.status(400).json({ success: false, message: 'Fee structure not found or already paid' });
+            if (!fee) {
+                res.status(400).json({ success: false, message: 'Fee structure not found' });
                 return;
             }
             pendingFees.push(fee);
-        } else {
-            // Otherwise, get all pending and partially paid fees for the student session (FIFO)
+            if (!studentSessionDoc) {
+                studentSessionDoc = await StudentSession.findById(fee.studentSessionId).session(session);
+            }
+        } else if (studentSessionDoc) {
+            // 2. Otherwise, get all pending and partially paid fees for the student session (FIFO)
             pendingFees = await FeeStructure.find({
-                studentSessionId,
+                studentSessionId: studentSessionDoc._id,
                 status: { $in: ['PENDING', 'PARTIALLY_PAID'] }
             }).sort({ createdAt: 1 }).session(session);
+
+            // Fallback: if no pending fees, fetch the latest fee structure
+            if (pendingFees.length === 0) {
+                const latestFee = await FeeStructure.findOne({
+                    studentSessionId: studentSessionDoc._id
+                }).sort({ createdAt: -1 }).session(session);
+                if (latestFee) {
+                    pendingFees.push(latestFee);
+                }
+            }
         }
 
         if (pendingFees.length === 0) {
-            res.status(400).json({ success: false, message: 'No pending fees found' });
+            res.status(400).json({ success: false, message: 'No fee structures found for this student to apply payment' });
             return;
         }
 
-        let remainingAmount = amountPaid;
+        let remainingAmount = numericAmount;
         const paymentsMade = [];
 
         for (const fee of pendingFees) {
@@ -62,16 +87,16 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
             const totalPaidSoFar = existingPayments.reduce((sum, p) => sum + p.amountPaid, 0);
             
             const actualDue = fee.total - totalPaidSoFar;
-            if (actualDue <= 0) continue; // Already fully paid, should be marked PAID
+            // If fee has no due but it's the only one targeted, allocate remaining
+            const amountToAllocate = actualDue > 0 ? Math.min(remainingAmount, actualDue) : remainingAmount;
+            if (amountToAllocate <= 0) continue;
 
-            const amountToAllocate = Math.min(remainingAmount, actualDue);
-            
             // Create payment record
             const receiptNo = await generateReceiptNo();
             const payment = new Payment({
                 feeStructureId: fee._id,
                 amountPaid: amountToAllocate,
-                paymentMode,
+                paymentMode: paymentMode || 'CASH',
                 receiptNo
             });
             await payment.save({ session });
@@ -79,75 +104,75 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
 
             // Update FeeStructure status
             const newTotalPaid = totalPaidSoFar + amountToAllocate;
-            fee.status = newTotalPaid >= fee.total ? 'PAID' : 'PARTIALLY_PAID';
+            if (newTotalPaid >= fee.total && fee.total > 0) {
+                fee.status = 'PAID';
+            } else if (newTotalPaid > 0) {
+                fee.status = 'PARTIALLY_PAID';
+            } else {
+                fee.status = 'PENDING';
+            }
             await fee.save({ session });
 
             remainingAmount -= amountToAllocate;
         }
 
-        if (remainingAmount > 0) {
-            // Unallocated amount - in a real system, you might want an "advance balance" or wallet system
-            console.warn(`Payment has ${remainingAmount} unallocated amount`);
-        }
-
         await session.commitTransaction();
         session.endSession();
 
-        // Send WhatsApp Notification
-        try {
-            // Find student to get contact details
-            const studentSession = await mongoose.model('StudentSession').findById(studentSessionId).populate('userId');
-            if (studentSession && studentSession.userId) {
-                const user: any = studentSession.userId;
-                if (user.phone) {
-                    const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000";
-                    let whatsappMsg = `Dear Parent,\n\nWe have received a fee payment of ₹${parseFloat(amountPaid).toFixed(2)} (via ${paymentMode}) for student ${user.name} (Card No: ${studentSession.cardNo}).\n\n`;
-                    
-                    if (paymentsMade.length > 0) {
-                        whatsappMsg += `View/Print Digital Invoice: ${FRONTEND_URL}/erp/fees/receipt/${paymentsMade[0].receiptNo}\n\n`;
+        // Send WhatsApp Payment Receipt Confirmation Notification
+        if (studentSessionDoc) {
+            try {
+                const studentSession = await StudentSession.findById(studentSessionDoc._id)
+                    .populate<{ userId: any }>('userId')
+                    .populate<{ classId: any }>('classId');
+
+                if (studentSession && studentSession.userId) {
+                    const userObj = studentSession.userId as any;
+                    const parentPhone = userObj.phone || userObj.studentProfile?.fatherMobile || userObj.studentProfile?.motherMobile;
+                    const studentName = userObj.name || 'Student';
+                    const className = (studentSession.classId as any)?.className || '';
+                    const cardNo = studentSession.cardNo || '';
+
+                    // Calculate remaining balance for student
+                    const allFees = await FeeStructure.find({ studentSessionId: studentSession._id });
+                    const feeIds = allFees.map(f => f._id);
+                    const allPayments = await Payment.find({ feeStructureId: { $in: feeIds } });
+                    const totalBilling = allFees.reduce((sum, f) => sum + (f.total || 0), 0);
+                    const totalPaid = allPayments.reduce((sum, p) => sum + (p.amountPaid || 0), 0);
+                    const remainingBal = Math.max(0, Math.round((totalBilling - totalPaid) * 100) / 100);
+
+                    const lastReceiptNo = paymentsMade[0]?.receiptNo || 'N/A';
+
+                    const waMessage = `✨ *GREEN VIEW PUBLIC SCHOOL* ✨\n` +
+                        `*FEE PAYMENT RECEIPT CONFIRMATION*\n\n` +
+                        `Dear Parent,\n` +
+                        `We have successfully received the fee payment for your ward:\n\n` +
+                        `👤 *Student:* ${studentName}\n` +
+                        `🏫 *Class:* ${className}\n` +
+                        `💳 *Roll/Card No:* ${cardNo}\n` +
+                        `🧾 *Receipt No:* ${lastReceiptNo}\n` +
+                        `💰 *Amount Received:* ₹${numericAmount.toLocaleString('en-IN')}\n` +
+                        `💳 *Payment Mode:* ${paymentMode || 'CASH'}\n` +
+                        `📌 *Remaining Session Dues:* ₹${remainingBal.toLocaleString('en-IN')}\n\n` +
+                        `Thank you for your timely payment!\n` +
+                        `For queries, please contact School Accounts Counter.\n\n` +
+                        `_Green View Public School, Lower Hatwas_`;
+
+                    if (parentPhone) {
+                        sendWhatsAppMessage(parentPhone, waMessage).catch(err => {
+                            console.error('[WhatsApp] Failed to send payment confirmation:', err);
+                        });
                     }
-
-                    // Calculate remaining balance
-                    const remainingFees = await FeeStructure.find({
-                        studentSessionId,
-                        status: { $in: ['PENDING', 'PARTIALLY_PAID'] }
-                    });
-
-                    let totalRemaining = 0;
-                    const breakdowns = [];
-                    for (const fs of remainingFees) {
-                        const existingPayments = await Payment.find({ feeStructureId: fs._id });
-                        const totalPaidSoFar = existingPayments.reduce((sum, p) => sum + p.amountPaid, 0);
-                        const monthRemaining = fs.total - totalPaidSoFar;
-                        if (monthRemaining > 0) {
-                            totalRemaining += monthRemaining;
-                            breakdowns.push(`- ${fs.month}: ₹${monthRemaining.toFixed(2)} pending`);
-                        }
-                    }
-
-                    if (totalRemaining > 0) {
-                        whatsappMsg += `The overall remaining balance is ₹${totalRemaining.toFixed(2)}.\n\nPending Month Breakdown:\n${breakdowns.join("\n")}\n\n`;
-                    } else {
-                        whatsappMsg += `All pending fees have been fully paid. Your remaining balance is ₹0.00.\n\n`;
-                    }
-                    
-                    whatsappMsg += `Thank you,\nGreen View Administration`;
-
-                    // Send asynchronously
-                    import('../services/whatsappService').then(({ sendWhatsAppMessage }) => {
-                        sendWhatsAppMessage(user.phone, whatsappMsg).catch((err: any) => console.error("WhatsApp error:", err));
-                    }).catch(err => console.error("Failed to load whatsapp module:", err));
                 }
+            } catch (waErr) {
+                console.error('[WhatsApp] Error building payment message:', waErr);
             }
-        } catch (whatsappErr) {
-            console.error("WhatsApp fee notification error:", whatsappErr);
         }
 
         res.status(200).json({ 
             success: true, 
-            message: 'Payment processed successfully',
-            payments: paymentsMade,
-            unallocated: remainingAmount > 0 ? remainingAmount : 0
+            message: `Payment of ₹${numericAmount} collected successfully`, 
+            payments: paymentsMade 
         });
     } catch (error: any) {
         await session.abortTransaction();
@@ -159,26 +184,22 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
 
 export const getReceipt = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.params; // payment _id or receiptNo
-        const payment = await Payment.findOne({
-            $or: [
-                { _id: mongoose.isValidObjectId(id) ? id : null },
-                { receiptNo: id }
+        const { feeStructureId } = req.params;
+        const payments = await Payment.find({ feeStructureId }).sort({ createdAt: -1 });
+        const fee = await FeeStructure.findById(feeStructureId).populate({
+            path: 'studentSessionId',
+            populate: [
+                { path: 'userId' },
+                { path: 'classId' }
             ]
-        }).populate({
-            path: 'feeStructureId',
-            populate: {
-                path: 'studentSessionId',
-                populate: ['userId', 'classId']
-            }
         });
 
-        if (!payment) {
-            res.status(404).json({ success: false, message: 'Receipt not found' });
+        if (!fee) {
+            res.status(404).json({ success: false, message: 'Fee structure not found' });
             return;
         }
 
-        res.status(200).json({ success: true, payment });
+        res.status(200).json({ success: true, fee, payments });
     } catch (error) {
         console.error('Get receipt error:', error);
         res.status(500).json({ success: false, message: 'Failed to get receipt' });

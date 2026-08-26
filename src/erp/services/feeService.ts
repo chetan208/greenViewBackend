@@ -4,6 +4,31 @@ import Class from '../../model/erpModels/class';
 import { IStudentSession } from '../../model/erpModels/studentSession';
 import TransportFee from '../../model/erpModels/transportFee';
 import FeeStructure from '../../model/erpModels/feeStructure';
+import Payment from '../../model/erpModels/payment';
+
+export const getAdmissionStartMonthIndex = (dateOfAdmission?: Date | string): number => {
+    if (!dateOfAdmission) return 0;
+    const date = new Date(dateOfAdmission);
+    if (isNaN(date.getTime())) return 0;
+    
+    const month = date.getMonth(); // 0 = Jan, 1 = Feb, 2 = Mar, 3 = Apr, 4 = May, 5 = Jun, 6 = Jul, 7 = Aug, 8 = Sep, 9 = Oct, 10 = Nov, 11 = Dec
+    
+    // Academic year months order (April to March):
+    // 0: April (month 3), 1: May (month 4), 2: June (month 5), 3: July (month 6), 
+    // 4: August (month 7), 5: September (month 8), 6: October (month 9), 
+    // 7: November (month 10), 8: December (month 11), 9: January (month 0), 
+    // 10: February (month 1), 11: March (month 2)
+    const monthOrder = [3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2];
+    const index = monthOrder.indexOf(month);
+    return index >= 0 ? index : 0;
+};
+
+export const getCurrentMonthIndex = (date: Date = new Date()): number => {
+    const month = date.getMonth();
+    const monthOrder = [3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2];
+    const index = monthOrder.indexOf(month);
+    return index >= 0 ? index : 0;
+};
 
 export const calculateMonthlyFee = async (
     studentSession: IStudentSession, 
@@ -12,8 +37,13 @@ export const calculateMonthlyFee = async (
     isAdmissionMonth: boolean,
     previousSessionDues: number = 0
 ) => {
-    // 1. Fetch Class Monthly Overrides
-    let classFees = await ClassMonthlyFee.findOne({ className, monthName: monthStr });
+    const monthNameOnly = monthStr.split('-')[0];
+
+    // 1. Fetch Class Monthly Overrides (matches "April" or "April-2026")
+    let classFees = await ClassMonthlyFee.findOne({ 
+        className, 
+        monthName: { $in: [monthStr, monthNameOnly] } 
+    });
     
     // Fallback to Class default fees if override not found
     if (!classFees) {
@@ -42,13 +72,15 @@ export const calculateMonthlyFee = async (
     
     // Other fixed components
     const ptmFine = classFees.ptmFine || 0;
-    const tieBeltBooks = isAdmissionMonth ? (classFees.tieBeltBooks || 0) : 0;
-    const buildingFund = isAdmissionMonth ? (classFees.buildingFund || 0) : 0;
+    const smartClassFee = classFees.smartClassFee || 0;
+    const sportsFee = classFees.sportsFee || 0;
+    const lateFee = classFees.lateFee || 0;
+    const otherCharges = classFees.otherCharges || 0;
 
     // 4. Total Calculation
     const total = admissionFee + tuitionFee + examFee + schoolBusCharges + 
-                  ptmFine + computerFee + tieBeltBooks + buildingFund + 
-                  annualCharges + previousSessionDues;
+                  computerFee + smartClassFee + sportsFee + ptmFine + 
+                  lateFee + annualCharges + otherCharges + previousSessionDues;
 
     return {
         studentSessionId: studentSession._id,
@@ -58,11 +90,13 @@ export const calculateMonthlyFee = async (
         tuitionFee,
         examFee,
         schoolBusCharges,
-        ptmFine,
         computerFee,
-        tieBeltBooks,
-        buildingFund,
+        smartClassFee,
+        sportsFee,
+        ptmFine,
+        lateFee,
         annualCharges,
+        otherCharges,
         previousSessionDues,
         total,
         status: 'PENDING'
@@ -72,24 +106,46 @@ export const calculateMonthlyFee = async (
 export const generateFeeStructuresForSession = async (
     studentSession: IStudentSession,
     className: string,
-    startMonthIndex: number = 0, // 0 = April, 1 = May, etc.
-    previousDues: number = 0
+    startMonthIndex?: number,
+    previousDues: number = 0,
+    endMonthIndex?: number
 ) => {
     const months = [
         "April", "May", "June", "July", "August", "September", 
         "October", "November", "December", "January", "February", "March"
     ];
 
-    const feeStructures = [];
-    
-    // Determine the year logic (e.g. session 2026-27)
-    // For simplicity, monthStr format will be like "April-2026"
-    // We'll need a helper to append the correct year based on the session string
-    // Assuming session is populated or passed, but let's just use month names for now or "Month Year"
+    // Start from admission month
+    let actualStartIndex = startMonthIndex;
+    if (actualStartIndex === undefined || actualStartIndex === null) {
+        const admissionDate = studentSession.dateOfAdmission || (studentSession as any).createdAt;
+        actualStartIndex = getAdmissionStartMonthIndex(admissionDate);
+    }
 
-    for (let i = startMonthIndex; i < months.length; i++) {
+    // End at current month (or specified endMonthIndex)
+    let actualEndIndex = endMonthIndex;
+    if (actualEndIndex === undefined || actualEndIndex === null) {
+        actualEndIndex = getCurrentMonthIndex();
+    }
+
+    actualEndIndex = Math.min(11, Math.max(actualStartIndex, actualEndIndex));
+
+    // Check existing fees to avoid duplicate month generation
+    const existingFees = await FeeStructure.find({ studentSessionId: studentSession._id });
+    const existingMonthSet = new Set(existingFees.map(f => f.month.split('-')[0]));
+    const hasAnyExistingFees = existingFees.length > 0;
+
+    const feeStructures = [];
+
+    for (let i = actualStartIndex; i <= actualEndIndex; i++) {
         const monthStr = months[i];
-        const isAdmissionMonth = (i === startMonthIndex); // Apply one-time charges in the first generated month
+        
+        if (existingMonthSet.has(monthStr)) {
+            continue;
+        }
+
+        // One-time admission fee & annual charges apply ONLY in the student's FIRST ever generated month
+        const isAdmissionMonth = (!hasAnyExistingFees && i === actualStartIndex);
         const dues = isAdmissionMonth ? previousDues : 0;
 
         const feeData = await calculateMonthlyFee(
@@ -103,44 +159,85 @@ export const generateFeeStructuresForSession = async (
         feeStructures.push(feeData);
     }
 
-    // Insert all
     if (feeStructures.length > 0) {
         await FeeStructure.insertMany(feeStructures);
     }
 };
 
-export const syncPendingFeesAfterDiscountUpdate = async (studentSession: IStudentSession, className: string) => {
-    // 1. Fetch pending fees for this student session
-    const pendingFees = await FeeStructure.find({
-        studentSessionId: studentSession._id,
-        status: 'PENDING'
+export const syncUnpaidStudentFees = async (studentSession: IStudentSession, className: string) => {
+    const admissionDate = studentSession.dateOfAdmission || (studentSession as any).createdAt;
+    const startIdx = getAdmissionStartMonthIndex(admissionDate);
+    const currentIdx = getCurrentMonthIndex();
+
+    // 1. Generate missing fee structures from admission month up to current month
+    await generateFeeStructuresForSession(
+        studentSession, 
+        className, 
+        startIdx, 
+        (studentSession as any).previousSessionDues || 0, 
+        currentIdx
+    );
+
+    // 2. Fetch all fee structures for this student session
+    const fees = await FeeStructure.find({ studentSessionId: studentSession._id }).sort({ createdAt: 1 });
+    if (fees.length === 0) return;
+
+    const feeIds = fees.map(f => f._id);
+    const payments = await Payment.find({ feeStructureId: { $in: feeIds } });
+    
+    const paidMap = new Map<string, number>();
+    payments.forEach(p => {
+        const key = p.feeStructureId.toString();
+        paidMap.set(key, (paidMap.get(key) || 0) + (p.amountPaid || 0));
     });
 
-    for (const fee of pendingFees) {
-        // We can determine if it was the admission month if it previously had one-time charges
-        // Alternatively, since calculateMonthlyFee recalculates EVERYTHING, we can just use the previous values to detect if it was an admission month.
-        // Wait, what if the discount brought the admission fee to 0? We can check if `tieBeltBooks` or `buildingFund` > 0, which are also one-time but not discountable.
-        // Or if ANY of the one-time charges were > 0.
-        const isAdmissionMonth = (fee.admissionFee > 0 || fee.annualCharges > 0 || fee.tieBeltBooks > 0 || fee.buildingFund > 0);
-        
+    const firstFeeId = fees[0]?._id?.toString();
+
+    for (const fee of fees) {
+        // STRICT RULE: If already fully PAID (Settled) or Manually Edited by Admin, DO NOT overwrite!
+        if (fee.status === 'PAID' || fee.isManuallyEdited) {
+            continue;
+        }
+
+        // Admission month is the student's FIRST fee structure
+        const isAdmissionMonth = (fee._id.toString() === firstFeeId);
+
         const newFeeData = await calculateMonthlyFee(
             studentSession,
             fee.month,
             className,
             isAdmissionMonth,
-            fee.previousSessionDues
+            fee.previousSessionDues || 0
         );
 
-        // Update the document
+        // Update unpaid fee structure heads with latest configuration
         fee.tuitionFee = newFeeData.tuitionFee;
         fee.admissionFee = newFeeData.admissionFee;
         fee.examFee = newFeeData.examFee;
         fee.schoolBusCharges = newFeeData.schoolBusCharges;
         fee.computerFee = newFeeData.computerFee;
-        fee.annualCharges = newFeeData.annualCharges;
+        fee.smartClassFee = newFeeData.smartClassFee;
+        fee.sportsFee = newFeeData.sportsFee;
         fee.ptmFine = newFeeData.ptmFine;
+        fee.lateFee = newFeeData.lateFee;
+        fee.annualCharges = newFeeData.annualCharges;
+        fee.otherCharges = newFeeData.otherCharges;
         fee.total = newFeeData.total;
-        
+
+        // Recalculate status based on payments already made
+        const paidAmount = paidMap.get(fee._id.toString()) || 0;
+        if (paidAmount >= fee.total && fee.total > 0) {
+            fee.status = 'PAID';
+        } else if (paidAmount > 0) {
+            fee.status = 'PARTIALLY_PAID';
+        } else {
+            fee.status = 'PENDING';
+        }
+
         await fee.save();
     }
+};
+
+export const syncPendingFeesAfterDiscountUpdate = async (studentSession: IStudentSession, className: string) => {
+    await syncUnpaidStudentFees(studentSession, className);
 };

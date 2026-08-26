@@ -31,6 +31,7 @@ import stationPublicRoutes from './erp/routes/stationPublic';
 import whatsappRoutes from './erp/routes/whatsappRoutes';
 import { initWhatsApp } from './erp/services/whatsappService';
 import { initFeeAutomationCron } from './erp/services/feeAutomationCron';
+import { ensureCurrentSession, initSessionCron } from './erp/services/sessionManager';
 
 const app = express();
 
@@ -124,10 +125,14 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 const PORT = process.env.PORT || 8000;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
     
+    // Auto-create academic session if it doesn't exist
+    await ensureCurrentSession();
+
     // Initialize WhatsApp and Cron Automation
     initWhatsApp();
     initFeeAutomationCron();
+    initSessionCron();
 });
