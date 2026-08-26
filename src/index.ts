@@ -94,6 +94,8 @@ app.use(cookieParser());
 
 app.use('/api/admin', adminRoutes);
 app.use('/api/study-material', studyMaterialRoutes);
+import heroImagesRoutes from './routes/heroImages';
+app.use('/api/hero-images', heroImagesRoutes);
 import topResultRoutes from './routes/topResult';
 app.use('/api/top-results', topResultRoutes);
 
