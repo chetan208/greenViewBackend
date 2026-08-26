@@ -6,6 +6,6 @@ const router = express.Router();
 
 router.post('/make-payment', isAuthenticated, isOwner, makePayment);
 // Public receipt access
-router.get('/receipt/public/:id', getReceipt);
+router.get('/receipt/public/:feeStructureId', getReceipt);
 
 export default router;

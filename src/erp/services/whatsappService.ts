@@ -1,4 +1,4 @@
-import makeWASocket, { DisconnectReason, BufferJSON, initAuthCreds, proto } from '@whiskeysockets/baileys';
+import makeWASocket, { DisconnectReason, BufferJSON, initAuthCreds, proto, Browsers } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import WhatsAppSession from '../../model/erpModels/whatsappSession';
@@ -152,7 +152,7 @@ export const initWhatsApp = async () => {
             auth: state,
             printQRInTerminal: false,
             logger: logger,
-            browser: ['Ubuntu', 'Chrome', '20.0.04'],
+            browser: Browsers.macOS('Desktop'),
             syncFullHistory: false,
             generateHighQualityLinkPreview: false
         });
@@ -214,6 +214,23 @@ export const initWhatsApp = async () => {
             if (!isDestroyed) saveCreds();
         });
 
+        // --- Ban Prevention: Natural Behavior Simulation ---
+        // Auto-read incoming messages to simulate an active human user
+        sock.ev.on('messages.upsert', async (m: any) => {
+            if (m.type === 'notify') {
+                for (const msg of m.messages) {
+                    if (!msg.key.fromMe) {
+                        try {
+                            // Delay slightly before reading
+                            await new Promise(res => setTimeout(res, 1500));
+                            await sock.readMessages([msg.key]);
+                        } catch (_) {}
+                    }
+                }
+            }
+        });
+        // ----------------------------------------------------
+
     } catch (error) {
         console.error('[WhatsApp] Init failed:', error);
     }
@@ -267,26 +284,76 @@ export const logoutWhatsApp = async () => {
     }
 };
 
-// ─── Send Message ───
-export const sendWhatsAppMessage = async (number: string, message: string) => {
-    try {
-        if (!sock || !isConnected) {
-            return { success: false, error: "WhatsApp not connected." };
+// ─── Strict Sequential Message Queue ───
+interface MessageTask {
+    number: string;
+    message: string;
+    resolve: (value: any) => void;
+}
+
+const messageQueue: MessageTask[] = [];
+let isProcessingMessageQueue = false;
+
+const processMessageQueue = async () => {
+    if (isProcessingMessageQueue || messageQueue.length === 0) return;
+    isProcessingMessageQueue = true;
+
+    while (messageQueue.length > 0) {
+        const task = messageQueue.shift();
+        if (!task) continue;
+
+        const { number, message, resolve } = task;
+
+        try {
+            if (!sock || !isConnected) {
+                resolve({ success: false, error: "WhatsApp not connected." });
+                continue;
+            }
+
+            if (!number || typeof number !== 'string') {
+                resolve({ success: false, error: "Invalid phone number." });
+                continue;
+            }
+
+            let cleanNumber = number.replace(/\D/g, '');
+            if (cleanNumber.length === 10) cleanNumber = `91${cleanNumber}`;
+            const jid = `${cleanNumber}@s.whatsapp.net`;
+
+            // --- Ban Prevention: Natural Behavior Simulation ---
+            // 1. Mark presence as 'composing' (typing indicator)
+            await sock.sendPresenceUpdate('composing', jid);
+
+            // 2. Random delay between 2 to 5 seconds
+            const randomDelay = Math.floor(Math.random() * (5000 - 2000 + 1)) + 2000;
+            await new Promise(res => setTimeout(res, randomDelay));
+
+            // 3. Mark presence as 'paused' (typing stopped)
+            await sock.sendPresenceUpdate('paused', jid);
+            // ----------------------------------------------------
+
+            await sock.sendMessage(jid, { text: message });
+            console.log(`[WhatsApp] ✉ Message sent to ${cleanNumber.slice(-4).padStart(cleanNumber.length, '*')} after ${randomDelay}ms delay`);
+            
+            // Add a small cool-down between consecutive queue tasks (1-2 seconds)
+            if (messageQueue.length > 0) {
+                const coolDown = Math.floor(Math.random() * 2000) + 1000;
+                await new Promise(res => setTimeout(res, coolDown));
+            }
+
+            resolve({ success: true, status: "Sent" });
+        } catch (error: any) {
+            console.error(`[WhatsApp] Send failed (${number}):`, error.message);
+            resolve({ success: false, error: error.message });
         }
-
-        if (!number || typeof number !== 'string') {
-            return { success: false, error: "Invalid phone number." };
-        }
-
-        let cleanNumber = number.replace(/\D/g, '');
-        if (cleanNumber.length === 10) cleanNumber = `91${cleanNumber}`;
-        const jid = `${cleanNumber}@s.whatsapp.net`;
-
-        await sock.sendMessage(jid, { text: message });
-        console.log(`[WhatsApp] ✉ Message sent to ${cleanNumber.slice(-4).padStart(cleanNumber.length, '*')}`);
-        return { success: true, status: "Sent" };
-    } catch (error: any) {
-        console.error(`[WhatsApp] Send failed (${number}):`, error.message);
-        return { success: false, error: error.message };
     }
+
+    isProcessingMessageQueue = false;
+};
+
+// ─── Send Message (Push to Queue) ───
+export const sendWhatsAppMessage = (number: string, message: string): Promise<any> => {
+    return new Promise((resolve) => {
+        messageQueue.push({ number, message, resolve });
+        processMessageQueue();
+    });
 };

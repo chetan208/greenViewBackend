@@ -211,10 +211,14 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
     try {
         const app = await AdmissionApplication.findById(req.params.id).session(session);
         if (!app) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(404).json({ success: false, message: 'Application not found' });
             return;
         }
         if (app.status !== 'PENDING') {
+            await session.abortTransaction();
+            session.endSession();
             res.status(400).json({ success: false, message: `Application is already ${app.status}` });
             return;
         }
@@ -234,6 +238,8 @@ export const approveApplication = async (req: Request, res: Response): Promise<v
 
         const classDoc = await Class.findOne({ className: app.appliedClass }).session(session);
         if (!classDoc) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(400).json({ success: false, message: 'Class not found' });
             return;
         }
@@ -404,8 +410,6 @@ export const rejectApplication = async (req: Request, res: Response): Promise<vo
         app.status = 'REJECTED';
         app.rejectionReason = reason;
         app.approvedBy = new mongoose.Types.ObjectId(req.user?.userId);
-        app.status = 'REJECTED';
-        app.rejectionReason = reason;
         
         if (app.photoPublicId && app.cloudName) {
             try {

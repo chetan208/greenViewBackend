@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import Session from '../../model/erpModels/session';
 
 export const getSessions = async (req: Request, res: Response): Promise<void> => {
@@ -26,15 +27,26 @@ export const createSession = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
+        let sessionDoc = new Session({ year, isActive: isActive || false });
+
         if (isActive) {
-            // Deactivate all others
-            await Session.updateMany({}, { isActive: false });
+            const dbSession = await mongoose.startSession();
+            dbSession.startTransaction();
+            try {
+                await Session.updateMany({}, { isActive: false }).session(dbSession);
+                await sessionDoc.save({ session: dbSession });
+                await dbSession.commitTransaction();
+                dbSession.endSession();
+            } catch (err) {
+                await dbSession.abortTransaction();
+                dbSession.endSession();
+                throw err;
+            }
+        } else {
+            await sessionDoc.save();
         }
 
-        const session = new Session({ year, isActive: isActive || false });
-        await session.save();
-
-        res.status(201).json({ success: true, message: 'Session created successfully', session });
+        res.status(201).json({ success: true, message: 'Session created successfully', session: sessionDoc });
     } catch (error) {
         console.error('Create session error:', error);
         res.status(500).json({ success: false, message: 'Failed to create session' });
@@ -45,17 +57,34 @@ export const updateSession = async (req: Request, res: Response): Promise<void> 
     try {
         const { isActive } = req.body;
         
+        let updatedSession;
+        
         if (isActive) {
-            await Session.updateMany({}, { isActive: false });
+            const dbSession = await mongoose.startSession();
+            dbSession.startTransaction();
+            try {
+                await Session.updateMany({}, { isActive: false }).session(dbSession);
+                updatedSession = await Session.findByIdAndUpdate(
+                    req.params.id,
+                    { isActive },
+                    { returnDocument: 'after' }
+                ).session(dbSession);
+                await dbSession.commitTransaction();
+                dbSession.endSession();
+            } catch (err) {
+                await dbSession.abortTransaction();
+                dbSession.endSession();
+                throw err;
+            }
+        } else {
+            updatedSession = await Session.findByIdAndUpdate(
+                req.params.id,
+                { isActive },
+                { returnDocument: 'after' }
+            );
         }
 
-        const session = await Session.findByIdAndUpdate(
-            req.params.id,
-            { isActive },
-            { returnDocument: 'after' }
-        );
-
-        res.status(200).json({ success: true, message: 'Session updated successfully', session });
+        res.status(200).json({ success: true, message: 'Session updated successfully', session: updatedSession });
     } catch (error) {
         console.error('Update session error:', error);
         res.status(500).json({ success: false, message: 'Failed to update session' });

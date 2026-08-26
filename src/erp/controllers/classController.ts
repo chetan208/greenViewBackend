@@ -69,9 +69,15 @@ export const updateClassDefaults = async (req: Request, res: Response): Promise<
             return;
         }
 
+        const ALLOWED_FEES = ['admissionFee', 'tuitionFee', 'examFee', 'computerFee', 'smartClassFee', 'sportsFee', 'ptmFine', 'lateFee', 'annualCharges', 'otherCharges'];
+        const safeFees: any = {};
+        for (const key of ALLOWED_FEES) {
+            if (fees[key] !== undefined) safeFees[key] = fees[key];
+        }
+
         const updated = await Class.findOneAndUpdate(
             { className },
-            { $set: fees },
+            { $set: safeFees },
             { returnDocument: 'after', upsert: true }
         );
 
@@ -104,9 +110,15 @@ export const updateMonthlyOverride = async (req: Request, res: Response): Promis
             return;
         }
 
+        const ALLOWED_FEES = ['admissionFee', 'tuitionFee', 'examFee', 'computerFee', 'smartClassFee', 'sportsFee', 'ptmFine', 'lateFee', 'annualCharges', 'otherCharges'];
+        const safeFees: any = {};
+        for (const key of ALLOWED_FEES) {
+            if (fees[key] !== undefined) safeFees[key] = fees[key];
+        }
+
         const updated = await ClassMonthlyFee.findOneAndUpdate(
             { className, monthName },
-            { $set: fees },
+            { $set: safeFees },
             { returnDocument: 'after', upsert: true }
         );
 

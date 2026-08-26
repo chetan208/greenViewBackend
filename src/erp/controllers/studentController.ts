@@ -36,6 +36,8 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
         }
 
         if (!activeSession) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(400).json({ success: false, message: 'No session found and none provided' });
             return;
         }
@@ -48,6 +50,8 @@ export const createStudent = async (req: Request, res: Response): Promise<void> 
         }
 
         if (!classDoc) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(400).json({ success: false, message: 'Class not found' });
             return;
         }
@@ -240,12 +244,16 @@ export const updateStudent = async (req: Request, res: Response): Promise<void> 
             .session(session);
 
         if (!studentSession) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(404).json({ success: false, message: 'Student session not found' });
             return;
         }
 
         const user = await User.findById(studentSession.userId).session(session);
         if (!user) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(404).json({ success: false, message: 'Student user profile not found' });
             return;
         }

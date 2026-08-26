@@ -28,6 +28,8 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
 
         const numericAmount = parseFloat(amountPaid);
         if (isNaN(numericAmount) || numericAmount <= 0) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(400).json({ success: false, message: 'Invalid payment amount' });
             return;
         }
@@ -46,6 +48,8 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
         if (feeStructureId) {
             const fee = await FeeStructure.findById(feeStructureId).session(session);
             if (!fee) {
+                await session.abortTransaction();
+                session.endSession();
                 res.status(400).json({ success: false, message: 'Fee structure not found' });
                 return;
             }
@@ -72,6 +76,8 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
         }
 
         if (pendingFees.length === 0) {
+            await session.abortTransaction();
+            session.endSession();
             res.status(400).json({ success: false, message: 'No fee structures found for this student to apply payment' });
             return;
         }
@@ -143,10 +149,28 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
 
                     const lastReceiptNo = paymentsMade[0]?.receiptNo || 'N/A';
 
+                    // --- Content Variation (Spintax) to prevent WhatsApp bans ---
+                    const greetings = ["Dear Parent,", "Respected Parent,", "Hello!", "Greetings!"];
+                    const openings = [
+                        "We have successfully received the fee payment for your ward:",
+                        "This is to confirm the receipt of fee payment for your child:",
+                        "Thank you! We have received the fee payment for your ward:",
+                        "Fee payment has been successfully recorded for your child:"
+                    ];
+                    const closings = [
+                        "Thank you for your timely payment!",
+                        "We appreciate your timely fee submission.",
+                        "Thanks for the fee payment!",
+                        "Thank you for paying the fees."
+                    ];
+                    
+                    const g = greetings[Math.floor(Math.random() * greetings.length)];
+                    const o = openings[Math.floor(Math.random() * openings.length)];
+                    const c = closings[Math.floor(Math.random() * closings.length)];
+
                     const waMessage = `✨ *GREEN VIEW PUBLIC SCHOOL* ✨\n` +
                         `*FEE PAYMENT RECEIPT CONFIRMATION*\n\n` +
-                        `Dear Parent,\n` +
-                        `We have successfully received the fee payment for your ward:\n\n` +
+                        `${g}\n${o}\n\n` +
                         `👤 *Student:* ${studentName}\n` +
                         `🏫 *Class:* ${className}\n` +
                         `💳 *Roll/Card No:* ${cardNo}\n` +
@@ -154,7 +178,7 @@ export const makePayment = async (req: Request, res: Response): Promise<void> =>
                         `💰 *Amount Received:* ₹${numericAmount.toLocaleString('en-IN')}\n` +
                         `💳 *Payment Mode:* ${paymentMode || 'CASH'}\n` +
                         `📌 *Remaining Session Dues:* ₹${remainingBal.toLocaleString('en-IN')}\n\n` +
-                        `Thank you for your timely payment!\n` +
+                        `${c}\n` +
                         `For queries, please contact School Accounts Counter.\n\n` +
                         `_Green View Public School, Lower Hatwas_`;
 
